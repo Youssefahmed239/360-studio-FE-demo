@@ -1,13 +1,14 @@
 {
   "name": "360-studio-fe-demo",
   "private": true,
-  "version": "0.2.0",
+  "version": "0.3.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
-    "typecheck": "tsc -b --pretty"
+    "typecheck": "tsc -b --pretty",
+    "prepare:panorama": "node scripts/prepare-panorama.mjs"
   },
   "dependencies": {
     "@photo-sphere-viewer/core": "^5.11.0",
@@ -17,13 +18,15 @@
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "zustand": "^5.0.3",
-    "zod": "^3.24.1"
+    "zod": "^3.24.1",
+    "@photo-sphere-viewer/equirectangular-tiles-adapter": "^5.11.0"
   },
   "devDependencies": {
     "@types/react": "^18.3.18",
     "@types/react-dom": "^18.3.5",
     "@vitejs/plugin-react": "^4.3.4",
     "typescript": "~5.7.2",
-    "vite": "^6.0.7"
+    "vite": "^6.0.7",
+    "sharp": "^0.35.5"
   }
 }

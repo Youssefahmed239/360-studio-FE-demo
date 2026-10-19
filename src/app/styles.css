@@ -35,3 +35,6 @@
 .hotspot-external-link{display:inline-flex;align-items:center;gap:7px;margin-top:12px;color:#c2f970;font-size:11px;text-decoration:none}
 .hotspot-external-link:hover{text-decoration:underline}
 @media(max-width:700px){.studio-pano-marker-label{max-width:98px;font-size:10px}.studio-pano-marker{max-width:145px}.hotspot-modal{padding:20px}}
+
+/* Multi-resolution panorama source controls (v0.3.0). */
+.tile-manifest-form{display:flex;flex-direction:column;gap:7px;margin-top:16px;padding-top:13px;border-top:1px solid #283340}.tile-manifest-form>.field-label{line-height:1.4}.tile-manifest-form .text-field{margin-top:0}.tile-manifest-button{width:100%;min-height:31px;justify-content:center}.tile-manifest-button:disabled{opacity:.58;cursor:wait}.tile-manifest-active{display:flex;flex-direction:column;gap:5px;padding:10px;border:1px solid #3e5632;border-radius:7px;background:#1c281b}.tile-manifest-active strong{font-size:10px;color:#d6efbd}.tile-manifest-active span{font-size:9px;color:#9caf91}.tile-manifest-active button{align-self:flex-start;margin-top:4px;border:0;padding:0;background:transparent;color:#b7df85;font-size:9px;text-decoration:underline;text-underline-offset:3px}.tile-manifest-active button:hover{color:#d1ff9b}

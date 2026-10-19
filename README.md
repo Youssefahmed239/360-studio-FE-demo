@@ -1,37 +1,74 @@
 # 360 Studio FE Demo
 
-A new, independent frontend starter for a customizable 360° tour authoring studio. This is not the existing `360-studio-FE` repository.
+An independent frontend starter for a customizable 360° tour authoring studio. This repository is intentionally separate from `360-studio-FE`.
 
-## Current foundation (v0.2.0)
+## Current foundation (v0.3.0)
 
-- Responsive dark editor shell with scene list, canvas, sequence timeline, and scene inspector.
-- Editable project name and scene names.
-- Add scenes and configure transition type/duration.
-- Local browser draft persistence with autosave and a visible save state.
-- Export/import versioned editable project JSON.
-- Interactive WebGL 360° viewer for uploaded equirectangular panoramas, with drag-to-look, wheel/pinch zoom, scene changes, and configurable fade / fade-through-black / zoom / instant transitions.
-- Click-to-place spherical hotspots with yaw/pitch coordinates, labels, action types, navigation targets, and direct image/video/audio URL previews.
-- Uploaded panorama binaries stored in IndexedDB, while project metadata and the last-open scene are saved in localStorage for resume in the same browser.
-- Typed project schema for scenes, hotspots, assets, transition settings, audio settings, and project branding.
+- Responsive editor shell with scene list, canvas, timeline, and inspector.
+- Interactive Photo Sphere Viewer canvas for uploaded equirectangular panoramas.
+- Scene navigation, transitions, editable spherical hotspots, and basic image/video/audio hotspot previews.
+- Local draft persistence and browser IndexedDB storage for uploaded panorama originals.
+- Import/export of versioned editable project JSON (configuration only; not yet a portable media archive).
+- Multi-resolution equirectangular tile adapter support with an initial low-resolution preview and resolution levels selected as the viewer zooms.
+- A local Node/Sharp CLI that preserves the input original and generates a base preview plus JPEG tile levels.
 - Relative Vite build paths (`base: './'`) for static hosting under an Nginx subpath.
 
-## Not implemented yet
+## High-resolution panorama workflow
 
-The remaining major capabilities are multiresolution panorama tiling, complete uploaded-media archive export/import, rich media surfaces inside the sphere, configurable audio lifecycle controls, project branding tools, and a standalone production player build.
-
-## Requirements
-
-- Node.js 20.19+ or 22.12+
-- npm
-
-## Run locally
+### 1. Install dependencies
 
 ```bash
 npm install
-npm run dev
 ```
 
-## Check and build
+Requirements: Node.js 20.19+ or 22.12+ and npm. The local panorama processor uses `sharp`, which requires a supported Node.js runtime and its matching platform package.
+
+### 2. Generate a tile pyramid
+
+```bash
+npm run prepare:panorama -- ./lobby-12000x6000.jpg ./public/tours/lobby
+```
+
+The input must be a 2:1 equirectangular image at least 1,024 pixels wide. The output contains:
+
+```text
+public/tours/lobby/
+├── manifest.json
+├── preview.jpg
+├── README.md
+├── originals/
+│   └── lobby-12000x6000.jpg
+└── tiles/
+    ├── 3000/
+    ├── 6000/
+    └── 12000/
+```
+
+Exact level widths depend on the source image. The original is copied without recompression. The preview is a smaller JPEG; the tile images are derived display assets at quality 90. Tiles are at most approximately 1,024 pixels per side, and the tool supports up to 64 columns / 32 rows per level.
+
+### 3. Connect the generated manifest
+
+Start the studio with `npm run dev`. In the selected scene's **Panorama source** inspector, paste a URL to the generated `manifest.json` and choose **Enable multi-resolution tiles**. For example, if the generated output is under Vite's `public/tours/lobby`, use:
+
+```text
+http://localhost:5173/tours/lobby/manifest.json
+```
+
+The manifest and its preview/tile files must be accessible over HTTP(S). If they are hosted on a different origin from the Studio, enable CORS for the Studio origin on the media host/CDN. Keep the relative output paths intact. Loading a manifest from a URL requires the browser to be allowed to fetch that URL.
+
+### Why tiles?
+
+The viewer first loads `preview.jpg`, then asks for tiles that match the current view/zoom using Photo Sphere Viewer's tiled adapter. It does not download the complete high-resolution source as one large WebGL texture. The original remains preserved separately for future reprocessing. Network speed, cache headers, server/CDN latency, image dimensions, and device GPU memory still affect the user experience.
+
+## Save and export
+
+- **Save/autosave:** project configuration and the last-open scene are stored in `localStorage`; uploaded image binaries are stored in IndexedDB. This is browser-local storage, not cloud backup.
+- **Export project:** downloads `.360studio.json` with the editable project configuration. It does not yet package local upload binaries or the files referenced by tile manifests.
+- **Import project:** imports a compatible schema-v1 JSON file.
+
+A portable ZIP archive that bundles originals and generated files is still a separate milestone. Keep a copy of the tiled output folder alongside your project JSON until that archive flow lands.
+
+## Check/build
 
 ```bash
 npm run typecheck
@@ -39,23 +76,15 @@ npm run build
 npm run preview
 ```
 
-## Project save/export behavior
-
-- **Save / autosave:** stores project configuration and last-open scene in `localStorage`, plus uploaded panorama binaries in IndexedDB. This is a local draft, not cloud storage. Clearing browser storage/site data or changing browsers can remove it.
-- **Export project:** downloads a versioned `.360studio.json` with editable project configuration. The export currently excludes uploaded media binaries; a portable ZIP archive that bundles source assets is the next export milestone.
-- **Import project:** imports a compatible schema-v1 JSON file and asks before replacing the open project.
-
-## Deployment
-
-The Vite output in `dist/` is static and can be hosted by Nginx. This editor starter is not yet the end-user tour player; do not publish it as a finished tour product yet. The deployment bundle flow will be implemented separately so a published tour can run independently of this editor.
+`dist/` is the Studio editor build. It is not yet the final standalone public tour player. The self-contained production tour export, asset validation, versioned deployment, and rollback flow remain future work.
 
 ## Architecture direction
 
-- `src/types/project.ts`: engine-independent project schema.
-- `src/features/projects/projectStore.ts`: project state, autosave, and last-open scene restoration.
-- `src/features/assets/assetStorage.ts`: IndexedDB persistence for uploaded originals and transient preview URL restoration.
-- `src/features/panorama/PanoramaCanvas.tsx`: Photo Sphere Viewer runtime and spherical hotspot markers.
-- `src/lib/projectFiles.ts`: schema-versioned JSON project import/export.
-- `src/app/`: editor application and visual shell.
+- `src/types/project.ts`: engine-independent project and tile metadata.
+- `src/features/projects/projectStore.ts`: project state, autosave, and resume.
+- `src/features/assets/assetStorage.ts`: browser IndexedDB persistence for uploaded originals.
+- `src/features/panorama/PanoramaCanvas.tsx`: Photo Sphere Viewer runtime, single-image and tiled adapters, plus hotspot markers.
+- `src/features/panorama/panoramaManifest.ts`: manifest validation and URL resolution.
+- `scripts/prepare-panorama.mjs`: local multiresolution tile generation.
 
-The schema uses stable IDs so the project archive and published player can refer to the same scenes and assets later. Original panorama files should be preserved separately from generated preview/tiles in the future media pipeline.
+The project schema uses stable IDs so a future portable archive and standalone player can refer to the same scenes and assets.

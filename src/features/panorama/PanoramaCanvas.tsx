@@ -1,9 +1,11 @@
 import { useEffect, useRef } from 'react';
 import { Viewer } from '@photo-sphere-viewer/core';
 import { MarkersPlugin } from '@photo-sphere-viewer/markers-plugin';
+import { EquirectangularTilesAdapter } from '@photo-sphere-viewer/equirectangular-tiles-adapter';
+import type { EquirectangularMultiTilesPanorama } from '@photo-sphere-viewer/equirectangular-tiles-adapter';
 import '@photo-sphere-viewer/core/index.css';
 import '@photo-sphere-viewer/markers-plugin/index.css';
-import type { TourHotspot, TourScene } from '../../types/project';
+import type { TourHotspot, TourScene, TiledPanoramaSource } from '../../types/project';
 
 type Props = {
   scene: TourScene;
@@ -36,6 +38,31 @@ function makeMarkers(hotspots: TourHotspot[]) {
   }));
 }
 
+function panoramaKey(scene: TourScene): string | null {
+  if (scene.tiledPanorama) return `tiles:${JSON.stringify(scene.tiledPanorama)}`;
+  return scene.panoramaUrl ?? null;
+}
+
+function makeTiledPanorama(source: TiledPanoramaSource): EquirectangularMultiTilesPanorama {
+  return {
+    ...(source.baseUrl ? { baseUrl: source.baseUrl } : {}),
+    levels: source.levels.map(({ width, cols, rows }) => ({ width, cols, rows })),
+    tileUrl: (col, row, level) => {
+      const levelConfig = source.levels[level];
+      if (!levelConfig) return null;
+      return source.tileUrlTemplate
+        .replaceAll('{width}', String(levelConfig.width))
+        .replaceAll('{level}', String(level))
+        .replaceAll('{col}', String(col))
+        .replaceAll('{row}', String(row));
+    },
+  };
+}
+
+function panoramaInput(scene: TourScene): string | EquirectangularMultiTilesPanorama {
+  return scene.tiledPanorama ? makeTiledPanorama(scene.tiledPanorama) : scene.panoramaUrl!;
+}
+
 export default function PanoramaCanvas({ scene, placementMode, onPlaceHotspot, onHotspotAction }: Props) {
   const hostRef = useRef<HTMLDivElement>(null);
   const viewerRef = useRef<Viewer | null>(null);
@@ -46,16 +73,17 @@ export default function PanoramaCanvas({ scene, placementMode, onPlaceHotspot, o
   const latestRef = useRef({ placementMode, onPlaceHotspot, onHotspotAction, hotspots: scene.hotspots });
   latestRef.current = { placementMode, onPlaceHotspot, onHotspotAction, hotspots: scene.hotspots };
 
-  const hasPanorama = Boolean(scene.panoramaUrl);
+  const hasPanorama = Boolean(scene.tiledPanorama || scene.panoramaUrl);
+  const adapterMode = scene.tiledPanorama ? 'tiled' : 'single';
 
-  // Create one viewer for the active canvas. Changing from a scene with a panorama
-  // to one without one disposes the WebGL renderer so it does not retain GPU memory.
+  // Keep a viewer instance for each adapter type. Photo Sphere Viewer adapters are
+  // selected at construction, so switching a scene between single-image and tiled
+  // panoramas needs a controlled renderer recreation.
   useEffect(() => {
-    if (!hasPanorama || !scene.panoramaUrl || !hostRef.current) return;
+    if (!hasPanorama || !hostRef.current) return;
 
-    const viewer = new Viewer({
+    const baseOptions = {
       container: hostRef.current,
-      panorama: scene.panoramaUrl,
       navbar: false,
       defaultYaw: `${scene.initialYaw}deg`,
       defaultPitch: `${scene.initialPitch}deg`,
@@ -63,12 +91,15 @@ export default function PanoramaCanvas({ scene, placementMode, onPlaceHotspot, o
       minFov: 25,
       maxFov: 100,
       moveInertia: 0.72,
-      plugins: [[MarkersPlugin, { markers: makeMarkers(scene.hotspots) }]],
-    });
+      plugins: [[MarkersPlugin, { markers: makeMarkers(scene.hotspots) }]] as never,
+    };
+    const viewer = scene.tiledPanorama
+      ? new Viewer({ ...baseOptions, adapter: EquirectangularTilesAdapter, panorama: panoramaInput(scene) as never } as never)
+      : new Viewer({ ...baseOptions, panorama: scene.panoramaUrl! } as never);
 
     viewerRef.current = viewer;
     pluginRef.current = viewer.getPlugin(MarkersPlugin) as unknown as MarkerPlugin;
-    lastPanoramaRef.current = scene.panoramaUrl;
+    lastPanoramaRef.current = panoramaKey(scene);
     lastSceneIdRef.current = scene.id;
 
     viewer.addEventListener('click', ({ data }) => {
@@ -83,22 +114,24 @@ export default function PanoramaCanvas({ scene, placementMode, onPlaceHotspot, o
     });
 
     return () => {
+      transitionSequenceRef.current += 1;
       lastPanoramaRef.current = null;
       lastSceneIdRef.current = null;
       pluginRef.current = null;
       viewerRef.current = null;
       viewer.destroy();
     };
-    // `hasPanorama` intentionally controls the renderer lifetime. Scene source changes
-    // are handled below with setPanorama so the viewer can perform a scene transition.
+    // `adapterMode` controls renderer lifetime; source changes of the same type are
+    // handled by setPanorama below so the viewer can perform a configured transition.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hasPanorama]);
+  }, [hasPanorama, adapterMode]);
 
   useEffect(() => {
     const viewer = viewerRef.current;
-    if (!viewer || !scene.panoramaUrl) return;
+    if (!viewer || (!scene.tiledPanorama && !scene.panoramaUrl)) return;
 
-    const samePanorama = lastPanoramaRef.current === scene.panoramaUrl;
+    const nextPanoramaKey = panoramaKey(scene);
+    const samePanorama = lastPanoramaRef.current === nextPanoramaKey;
     const sameScene = lastSceneIdRef.current === scene.id;
     if (samePanorama && sameScene) return;
 
@@ -111,7 +144,7 @@ export default function PanoramaCanvas({ scene, placementMode, onPlaceHotspot, o
       void viewer.animate({ ...targetPosition, zoom: targetZoom, speed: Math.max(1, duration), easing: 'inOutSine' });
       return;
     }
-    lastPanoramaRef.current = scene.panoramaUrl;
+    lastPanoramaRef.current = nextPanoramaKey;
 
     if (scene.transition.kind === 'zoom') {
       // Zoom into the outgoing scene, switch while close, then widen into the destination.
@@ -119,11 +152,10 @@ export default function PanoramaCanvas({ scene, placementMode, onPlaceHotspot, o
         try {
           await viewer.animate({ zoom: 92, speed: Math.max(1, duration / 2), easing: 'inOutSine' });
           if (transitionSequence !== transitionSequenceRef.current) return;
-          await viewer.setPanorama(scene.panoramaUrl!, { transition: false, position: targetPosition, zoom: 18, showLoader: true });
+          await viewer.setPanorama(panoramaInput(scene) as never, { transition: false, position: targetPosition, zoom: 18, showLoader: true } as never);
           if (transitionSequence !== transitionSequenceRef.current) return;
           await viewer.animate({ zoom: targetZoom, speed: Math.max(1, duration / 2), easing: 'inOutSine' });
         } catch {
-          // The viewer shows its own loading/error state; do not break the editor.
           if (transitionSequence === transitionSequenceRef.current) lastPanoramaRef.current = null;
         }
       })();
@@ -132,16 +164,15 @@ export default function PanoramaCanvas({ scene, placementMode, onPlaceHotspot, o
 
     const effect: 'black' | 'fade' = scene.transition.kind === 'fade-through-black' ? 'black' : 'fade';
     const transition = scene.transition.kind === 'none' ? false : { effect, speed: duration, rotation: true };
-    void viewer.setPanorama(scene.panoramaUrl, {
+    void viewer.setPanorama(panoramaInput(scene) as never, {
       transition,
       position: targetPosition,
       zoom: targetZoom,
       showLoader: true,
-    }).catch(() => {
-      // The viewer displays its own loader/error state; keep the editor alive.
+    } as never).catch(() => {
       if (transitionSequence === transitionSequenceRef.current) lastPanoramaRef.current = null;
     });
-  }, [scene.id, scene.panoramaUrl, scene.initialYaw, scene.initialPitch, scene.initialZoom, scene.transition]);
+  }, [scene.id, scene.panoramaUrl, scene.tiledPanorama, scene.initialYaw, scene.initialPitch, scene.initialZoom, scene.transition]);
 
   useEffect(() => {
     const plugin = pluginRef.current;

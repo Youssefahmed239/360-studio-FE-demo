@@ -1,6 +1,27 @@
 export type HotspotKind = 'navigation' | 'image' | 'video' | 'audio' | 'info';
 export type TransitionKind = 'fade' | 'fade-through-black' | 'zoom' | 'none';
 
+/** One resolution band in a multi-resolution equirectangular panorama. */
+export interface TiledPanoramaLevel {
+  /** Full panorama width represented by this level; height is width / 2. */
+  width: number;
+  cols: number;
+  rows: number;
+  /** Photo Sphere Viewer zoom range for selecting this level. */
+  zoomRange: [number, number];
+}
+
+/** Resolved, runtime-ready tile settings. All URLs are absolute so scene changes do not depend on the current route. */
+export interface TiledPanoramaSource {
+  manifestUrl: string;
+  baseUrl?: string;
+  tileUrlTemplate: string;
+  levels: TiledPanoramaLevel[];
+  sourceWidth?: number;
+  sourceHeight?: number;
+  originalUrl?: string;
+}
+
 export interface TourHotspot {
   id: string;
   kind: HotspotKind;
@@ -17,6 +38,8 @@ export interface TourScene {
   name: string;
   panoramaAssetId?: string;
   panoramaUrl?: string;
+  /** Optional progressive tiled source. When present, this is preferred over panoramaUrl. */
+  tiledPanorama?: TiledPanoramaSource;
   initialYaw: number;
   initialPitch: number;
   initialZoom: number;

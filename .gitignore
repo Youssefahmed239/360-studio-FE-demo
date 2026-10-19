@@ -6,3 +6,6 @@ dist/
 .env
 .env.*
 !.env.example
+
+# Generated tour media can be very large. Keep it out of the source repository.
+public/tours/
