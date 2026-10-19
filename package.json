@@ -1,7 +1,7 @@
 {
   "name": "360-studio-fe-demo",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@photo-sphere-viewer/core": "^5.11.0",
+    "@photo-sphere-viewer/markers-plugin": "^5.11.0",
     "@photo-sphere-viewer/virtual-tour-plugin": "^5.11.0",
     "lucide-react": "^0.468.0",
     "react": "^18.3.1",

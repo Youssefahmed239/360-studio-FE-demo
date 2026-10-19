@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import type { TourProject, TourScene } from '../../types/project';
+import { restoreUploadedAssetUrls, stripTransientAssetUrls } from '../assets/assetStorage';
 
 const STORAGE_KEY = '360-studio-demo-project-v1';
 const now = () => new Date().toISOString();
@@ -30,8 +31,9 @@ interface ProjectState {
   selectScene: (id: string) => void;
   addScene: () => void;
   updateScene: (id: string, patch: Partial<TourScene>) => void;
+  updateProject: (project: TourProject) => void;
   save: () => void;
-  load: () => boolean;
+  load: () => Promise<boolean>;
   replaceProject: (project: TourProject) => void;
 }
 
@@ -46,30 +48,43 @@ export const useProjectStore = create<ProjectState>((set, get) => {
   return {
     project: initial,
     activeSceneId: initial.scenes[0].id,
-    saveState: 'unsaved',
+    saveState: 'saved',
     setProjectName: (name) => set((state) => ({ project: { ...state.project, name, updatedAt: now() }, saveState: 'unsaved' })),
-    selectScene: (activeSceneId) => set({ activeSceneId }),
+    selectScene: (activeSceneId) => set({ activeSceneId, saveState: 'unsaved' }),
     addScene: () => {
       const scene: TourScene = { id: id(), name: `New Scene ${get().project.scenes.length + 1}`, initialYaw: 0, initialPitch: 0, initialZoom: 0, transition: { kind: 'fade', durationMs: 700 }, hotspots: [] };
       set((state) => ({ project: { ...state.project, scenes: [...state.project.scenes, scene], updatedAt: now() }, activeSceneId: scene.id, saveState: 'unsaved' }));
     },
     updateScene: (sceneId, patch) => set((state) => ({ project: { ...state.project, scenes: state.project.scenes.map((scene) => scene.id === sceneId ? { ...scene, ...patch } : scene), updatedAt: now() }, saveState: 'unsaved' })),
+    updateProject: (project) => set({ project: { ...project, updatedAt: now() }, saveState: 'unsaved' }),
     save: () => {
       set({ saveState: 'saving' });
-      try { localStorage.setItem(STORAGE_KEY, JSON.stringify(get().project)); set({ saveState: 'saved' }); }
+      try {
+        const state = get();
+        localStorage.setItem(STORAGE_KEY, JSON.stringify({ draftVersion: 1, activeSceneId: state.activeSceneId, project: stripTransientAssetUrls(state.project) }));
+        set({ saveState: 'saved' });
+      }
       catch { set({ saveState: 'error' }); }
     },
-    load: () => {
+    load: async () => {
       try {
         const raw = localStorage.getItem(STORAGE_KEY);
         if (!raw) return false;
         const parsed: unknown = JSON.parse(raw);
-        if (!isProject(parsed)) return false;
-        set({ project: parsed, activeSceneId: parsed.scenes[0]?.id ?? '', saveState: 'saved' });
+        // Backward-compatible with v0.1 drafts that stored the project directly.
+        const isEnvelope = !!parsed && typeof parsed === 'object' && 'project' in parsed;
+        const projectValue = isEnvelope ? (parsed as { project?: unknown }).project : parsed;
+        if (!isProject(projectValue)) return false;
+        const restored = await restoreUploadedAssetUrls(projectValue);
+        const storedSceneId = isEnvelope ? (parsed as { activeSceneId?: unknown }).activeSceneId : undefined;
+        const preferredSceneId = typeof storedSceneId === 'string' && restored.scenes.some((scene) => scene.id === storedSceneId)
+          ? storedSceneId
+          : restored.scenes.find((scene) => scene.id === restored.settings.startSceneId)?.id ?? restored.scenes[0]?.id ?? '';
+        set({ project: restored, activeSceneId: preferredSceneId, saveState: 'saved' });
         return true;
       } catch { set({ saveState: 'error' }); return false; }
     },
-    replaceProject: (project) => set({ project, activeSceneId: project.scenes[0]?.id ?? '', saveState: 'unsaved' }),
+    replaceProject: (project) => set({ project, activeSceneId: project.scenes.find((scene) => scene.id === project.settings.startSceneId)?.id ?? project.scenes[0]?.id ?? '', saveState: 'unsaved' }),
   };
 });
 
