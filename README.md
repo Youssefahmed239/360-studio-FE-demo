@@ -88,3 +88,12 @@ npm run preview
 - `scripts/prepare-panorama.mjs`: local multiresolution tile generation.
 
 The project schema uses stable IDs so a future portable archive and standalone player can refer to the same scenes and assets.
+
+
+## Portable project ZIP archive (v0.4.0)
+
+- Use **Export project ZIP** to download an archive containing project.json, an archive manifest, uploaded assets, and tiled panorama previews/tiles/originals where the browser can fetch them. The ZIP STORE method packages already-compressed media without recompressing it.
+- Use **Open** and select a .360studio.zip file to restore the project and media into this browser. The importer validates archive paths, sizes, and CRC checksums.
+- Direct URL media is fetched into the archive if the browser has CORS access. Unfetchable URL media stays linked and is listed as an external dependency in archive-manifest.json.
+- ZIP64 is not implemented yet; archives larger than 4 GiB are rejected. Exporting remote high-resolution tiles requires every tile URL to be reachable from the Studio origin.
+- Asset binaries are written to IndexedDB in a single transaction on import. Project configuration and the active scene continue to use browser-local saving.

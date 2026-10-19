@@ -5,10 +5,11 @@ import { EquirectangularTilesAdapter } from '@photo-sphere-viewer/equirectangula
 import type { EquirectangularMultiTilesPanorama } from '@photo-sphere-viewer/equirectangular-tiles-adapter';
 import '@photo-sphere-viewer/core/index.css';
 import '@photo-sphere-viewer/markers-plugin/index.css';
-import type { TourHotspot, TourScene, TiledPanoramaSource } from '../../types/project';
+import type { TourAsset, TourHotspot, TourScene, TiledPanoramaSource } from '../../types/project';
 
 type Props = {
   scene: TourScene;
+  assets: TourAsset[];
   placementMode: boolean;
   onPlaceHotspot: (yaw: number, pitch: number) => void;
   onHotspotAction: (hotspot: TourHotspot) => void;
@@ -43,13 +44,19 @@ function panoramaKey(scene: TourScene): string | null {
   return scene.panoramaUrl ?? null;
 }
 
-function makeTiledPanorama(source: TiledPanoramaSource): EquirectangularMultiTilesPanorama {
+function makeTiledPanorama(source: TiledPanoramaSource, assetUrls: Map<string, string>): EquirectangularMultiTilesPanorama {
+  const baseUrl = source.baseAssetId ? assetUrls.get(source.baseAssetId) : source.baseUrl;
   return {
-    ...(source.baseUrl ? { baseUrl: source.baseUrl } : {}),
+    ...(baseUrl ? { baseUrl } : {}),
     levels: source.levels.map(({ width, cols, rows }) => ({ width, cols, rows })),
     tileUrl: (col, row, level) => {
       const levelConfig = source.levels[level];
       if (!levelConfig) return null;
+      const relativePath = 'tiles/' + levelConfig.width + '/' + col + '_' + row + '.jpg';
+      if (source.embeddedFiles) {
+        const assetId = source.embeddedFiles[relativePath];
+        return assetId ? assetUrls.get(assetId) ?? null : null;
+      }
       return source.tileUrlTemplate
         .replaceAll('{width}', String(levelConfig.width))
         .replaceAll('{level}', String(level))
@@ -59,11 +66,11 @@ function makeTiledPanorama(source: TiledPanoramaSource): EquirectangularMultiTil
   };
 }
 
-function panoramaInput(scene: TourScene): string | EquirectangularMultiTilesPanorama {
-  return scene.tiledPanorama ? makeTiledPanorama(scene.tiledPanorama) : scene.panoramaUrl!;
+function panoramaInput(scene: TourScene, assetUrls: Map<string, string>): string | EquirectangularMultiTilesPanorama {
+  return scene.tiledPanorama ? makeTiledPanorama(scene.tiledPanorama, assetUrls) : scene.panoramaUrl!;
 }
 
-export default function PanoramaCanvas({ scene, placementMode, onPlaceHotspot, onHotspotAction }: Props) {
+export default function PanoramaCanvas({ scene, assets, placementMode, onPlaceHotspot, onHotspotAction }: Props) {
   const hostRef = useRef<HTMLDivElement>(null);
   const viewerRef = useRef<Viewer | null>(null);
   const pluginRef = useRef<MarkerPlugin | null>(null);
@@ -72,6 +79,8 @@ export default function PanoramaCanvas({ scene, placementMode, onPlaceHotspot, o
   const transitionSequenceRef = useRef(0);
   const latestRef = useRef({ placementMode, onPlaceHotspot, onHotspotAction, hotspots: scene.hotspots });
   latestRef.current = { placementMode, onPlaceHotspot, onHotspotAction, hotspots: scene.hotspots };
+  const assetUrls = new Map<string, string>();
+  for (const asset of assets) if (asset.url) assetUrls.set(asset.id, asset.url);
 
   const hasPanorama = Boolean(scene.tiledPanorama || scene.panoramaUrl);
   const adapterMode = scene.tiledPanorama ? 'tiled' : 'single';
@@ -94,7 +103,7 @@ export default function PanoramaCanvas({ scene, placementMode, onPlaceHotspot, o
       plugins: [[MarkersPlugin, { markers: makeMarkers(scene.hotspots) }]] as never,
     };
     const viewer = scene.tiledPanorama
-      ? new Viewer({ ...baseOptions, adapter: EquirectangularTilesAdapter, panorama: panoramaInput(scene) as never } as never)
+      ? new Viewer({ ...baseOptions, adapter: EquirectangularTilesAdapter, panorama: panoramaInput(scene, assetUrls) as never } as never)
       : new Viewer({ ...baseOptions, panorama: scene.panoramaUrl! } as never);
 
     viewerRef.current = viewer;
@@ -124,7 +133,7 @@ export default function PanoramaCanvas({ scene, placementMode, onPlaceHotspot, o
     // `adapterMode` controls renderer lifetime; source changes of the same type are
     // handled by setPanorama below so the viewer can perform a configured transition.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hasPanorama, adapterMode]);
+  }, [hasPanorama, adapterMode, assets]);
 
   useEffect(() => {
     const viewer = viewerRef.current;
@@ -152,7 +161,7 @@ export default function PanoramaCanvas({ scene, placementMode, onPlaceHotspot, o
         try {
           await viewer.animate({ zoom: 92, speed: Math.max(1, duration / 2), easing: 'inOutSine' });
           if (transitionSequence !== transitionSequenceRef.current) return;
-          await viewer.setPanorama(panoramaInput(scene) as never, { transition: false, position: targetPosition, zoom: 18, showLoader: true } as never);
+          await viewer.setPanorama(panoramaInput(scene, assetUrls) as never, { transition: false, position: targetPosition, zoom: 18, showLoader: true } as never);
           if (transitionSequence !== transitionSequenceRef.current) return;
           await viewer.animate({ zoom: targetZoom, speed: Math.max(1, duration / 2), easing: 'inOutSine' });
         } catch {
@@ -164,7 +173,7 @@ export default function PanoramaCanvas({ scene, placementMode, onPlaceHotspot, o
 
     const effect: 'black' | 'fade' = scene.transition.kind === 'fade-through-black' ? 'black' : 'fade';
     const transition = scene.transition.kind === 'none' ? false : { effect, speed: duration, rotation: true };
-    void viewer.setPanorama(panoramaInput(scene) as never, {
+    void viewer.setPanorama(panoramaInput(scene, assetUrls) as never, {
       transition,
       position: targetPosition,
       zoom: targetZoom,

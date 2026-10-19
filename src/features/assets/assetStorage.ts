@@ -4,7 +4,7 @@ const DATABASE_NAME = '360-studio-demo-assets';
 const DATABASE_VERSION = 1;
 const STORE_NAME = 'uploaded-assets';
 
-type StoredAsset = { id: string; blob: Blob; name: string; mimeType: string; size: number };
+export type StoredAsset = { id: string; blob: Blob; name: string; mimeType: string; size: number };
 
 function openDatabase(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
@@ -51,6 +51,40 @@ async function readUploadedAsset(id: string): Promise<StoredAsset | null> {
   }
 }
 
+
+
+/** Read an uploaded binary for a portable project export. */
+export async function getUploadedAssetRecord(id: string): Promise<StoredAsset | null> {
+  return readUploadedAsset(id);
+}
+
+export interface ImportedStoredAsset {
+  id: string;
+  blob: Blob;
+  name: string;
+  mimeType: string;
+}
+
+/** Store a complete import in one IndexedDB transaction so a quota/error failure doesn't partially overwrite assets. */
+export async function persistImportedAssets(records: ImportedStoredAsset[]): Promise<void> {
+  if (!records.length) return;
+  const db = await openDatabase();
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(STORE_NAME, 'readwrite');
+      const store = tx.objectStore(STORE_NAME);
+      for (const record of records) {
+        store.put({ id: record.id, blob: record.blob, name: record.name, mimeType: record.mimeType, size: record.blob.size } satisfies StoredAsset);
+      }
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error ?? new Error('Could not restore project assets.'));
+      tx.onabort = () => reject(tx.error ?? new Error('Restoring project assets was aborted.'));
+    });
+  } finally {
+    db.close();
+  }
+}
+
 /** Persist only stable project metadata. Browser blob: URLs are valid for a session only. */
 export function stripTransientAssetUrls(project: TourProject): TourProject {
   const assetById = new Map(project.assets.map((asset) => [asset.id, asset]));
@@ -63,11 +97,23 @@ export function stripTransientAssetUrls(project: TourProject): TourProject {
   });
   const scenes = project.scenes.map((scene) => {
     const linkedAsset = scene.panoramaAssetId ? assetById.get(scene.panoramaAssetId) : undefined;
+    let stableScene = scene;
     if (linkedAsset?.source === 'uploaded' || scene.panoramaUrl?.startsWith('blob:')) {
-      const { panoramaUrl: _sessionUrl, ...stableScene } = scene;
-      return stableScene;
+      const { panoramaUrl: _sessionUrl, ...withoutSessionUrl } = scene;
+      stableScene = withoutSessionUrl;
     }
-    return scene;
+    if (scene.tiledPanorama) {
+      const source = scene.tiledPanorama;
+      stableScene = {
+        ...stableScene,
+        tiledPanorama: {
+          ...source,
+          ...(source.baseUrl?.startsWith('blob:') ? { baseUrl: undefined } : {}),
+          ...(source.originalUrl?.startsWith('blob:') ? { originalUrl: undefined } : {}),
+        },
+      };
+    }
+    return stableScene;
   });
   return { ...project, assets, scenes };
 }
@@ -90,12 +136,26 @@ export async function restoreUploadedAssetUrls(project: TourProject): Promise<To
   const assetById = new Map(assets.map((asset) => [asset.id, asset]));
   const scenes = project.scenes.map((scene) => {
     const asset = scene.panoramaAssetId ? assetById.get(scene.panoramaAssetId) : undefined;
-    if (asset?.source === 'uploaded') return { ...scene, panoramaUrl: restoredAssetUrls.get(asset.id) };
-    if (scene.panoramaUrl?.startsWith('blob:')) {
-      const { panoramaUrl: _sessionUrl, ...stableScene } = scene;
-      return stableScene;
+    let restoredScene = scene;
+    if (asset?.source === 'uploaded') restoredScene = { ...restoredScene, panoramaUrl: restoredAssetUrls.get(asset.id) };
+    else if (scene.panoramaUrl?.startsWith('blob:')) {
+      const { panoramaUrl: _sessionUrl, ...stableScene } = restoredScene;
+      restoredScene = stableScene;
     }
-    return scene;
+    if (scene.tiledPanorama) {
+      const source = scene.tiledPanorama;
+      const baseAsset = source.baseAssetId ? assetById.get(source.baseAssetId) : undefined;
+      const originalAsset = source.originalAssetId ? assetById.get(source.originalAssetId) : undefined;
+      restoredScene = {
+        ...restoredScene,
+        tiledPanorama: {
+          ...source,
+          ...(baseAsset?.url ? { baseUrl: baseAsset.url } : {}),
+          ...(originalAsset?.url ? { originalUrl: originalAsset.url } : {}),
+        },
+      };
+    }
+    return restoredScene;
   });
   return { ...project, assets, scenes };
 }

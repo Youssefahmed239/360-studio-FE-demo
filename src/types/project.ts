@@ -20,6 +20,11 @@ export interface TiledPanoramaSource {
   sourceWidth?: number;
   sourceHeight?: number;
   originalUrl?: string;
+  /** Asset IDs used when a portable ZIP embeds its preview and original. */
+  baseAssetId?: string;
+  originalAssetId?: string;
+  /** Relative tile path to project asset ID for offline portable archives. */
+  embeddedFiles?: Record<string, string>;
 }
 
 export interface TourHotspot {

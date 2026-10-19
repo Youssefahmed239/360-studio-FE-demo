@@ -4,7 +4,7 @@ import { useProjectStore } from '../features/projects/projectStore';
 import { persistUploadedAsset, restoreUploadedAssetUrls } from '../features/assets/assetStorage';
 import PanoramaCanvas from '../features/panorama/PanoramaCanvas';
 import { loadTiledPanoramaManifest } from '../features/panorama/panoramaManifest';
-import { exportProjectJson, importProjectJson } from '../lib/projectFiles';
+import { exportProjectArchive, importProjectFile } from '../lib/portableProjectArchive';
 import type { HotspotKind, TourHotspot, TourScene } from '../types/project';
 
 const statusText = { saved: 'All changes saved', unsaved: 'Unsaved changes', saving: 'Saving…', error: 'Save failed' } as const;
@@ -31,6 +31,8 @@ export default function App() {
   const [selectedHotspot, setSelectedHotspot] = useState<TourHotspot | null>(null);
   const [tileManifestUrl, setTileManifestUrl] = useState('');
   const [loadingTileManifest, setLoadingTileManifest] = useState(false);
+  const [exportingArchive, setExportingArchive] = useState(false);
+  const [exportStatus, setExportStatus] = useState('Preparing project ZIP…');
   const activeScene = project.scenes.find((scene) => scene.id === activeSceneId) ?? project.scenes[0];
 
   useEffect(() => { void load(); }, [load]);
@@ -70,14 +72,19 @@ export default function App() {
 
   function handleImport(file?: File) {
     if (!file) return;
-    void importProjectJson(file).then(async (incoming) => {
-      if (!window.confirm(`Open “${incoming.name}”? This replaces the current editor project.`)) return;
-      const restored = await restoreUploadedAssetUrls(incoming);
+    if (!window.confirm('Import file ' + file.name + ' and replace the current editor project? Uploaded files in the archive will be restored into this browser.')) return;
+    void importProjectFile(file).then(async (result) => {
+      const restored = await restoreUploadedAssetUrls(result.project);
       replaceProject(restored);
       const missingUploads = restored.assets.filter((asset) => asset.source === 'uploaded' && !asset.url).length;
-      setNotice(missingUploads
-        ? `Project imported, but ${missingUploads} uploaded file(s) were not in the JSON export. Use the original project browser or re-upload those files.`
-        : 'Project imported. Save to keep it in this browser.');
+      const dependencyMessage = result.externalDependencies.length
+        ? ' ' + result.externalDependencies.length + ' external media URL(s) still require an internet connection or may be blocked by CORS.'
+        : '';
+      setNotice(result.isArchive
+        ? 'Portable project restored with ' + result.importedAssetCount + ' media file(s). Save to keep it in this browser.' + dependencyMessage
+        : missingUploads
+          ? 'JSON imported, but ' + missingUploads + ' uploaded file(s) were not included in JSON. Import a portable ZIP to restore them.'
+          : 'Project JSON imported. Save to keep it in this browser.');
     }).catch((error: unknown) => setNotice(error instanceof Error ? error.message : 'Could not import project.'));
     if (importRef.current) importRef.current.value = '';
   }
@@ -105,11 +112,25 @@ export default function App() {
     setNotice('Tiled source disconnected. The single-image panorama will be used when available.');
   }
 
-  function handleExport() {
-    const omittedUploads = exportProjectJson(project);
-    setNotice(omittedUploads
-      ? `Project JSON exported. Note: ${omittedUploads} uploaded media file(s) are not included in JSON exports yet.`
-      : 'Project JSON exported.');
+  async function handleExport() {
+    if (exportingArchive) return;
+    setExportingArchive(true);
+    setExportStatus('Collecting project media…');
+    try {
+      const result = await exportProjectArchive(project, (progress) => {
+        if (progress.phase === 'downloading' && (progress.completed % 8 === 0 || progress.completed === progress.total)) {
+          setExportStatus(progress.detail);
+        } else if (progress.phase === 'packaging' && (progress.completed === 0 || progress.completed === progress.total || progress.completed % 25 === 0)) {
+          setExportStatus('Packaging ZIP ' + progress.completed + '/' + progress.total);
+        }
+      });
+      setNotice('Portable project ZIP downloaded with ' + result.fileCount + ' files (' + (result.totalBytes / (1024 * 1024)).toFixed(1) + ' MB).' + (result.externalDependencies.length ? ' ' + result.externalDependencies.length + ' external URL(s) could not be bundled and remain linked.' : ' Project assets are bundled.'));
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : 'Could not export the portable project.');
+    } finally {
+      setExportingArchive(false);
+      setExportStatus('Preparing project ZIP…');
+    }
   }
 
   function updateSceneName(name: string) { if (activeScene) updateScene(activeScene.id, { name }); }
@@ -163,10 +184,10 @@ export default function App() {
       <div className="top-actions">
         <button className="button button-quiet" onClick={() => importRef.current?.click()}><FolderOpen size={16} /> Open</button>
         <button className="button button-quiet" onClick={() => { save(); setNotice('Project draft saved in this browser.'); }}><Save size={16} /> Save</button>
-        <button className="button button-outline" onClick={handleExport}><ArrowDownToLine size={16} /> Export project</button>
+        <button className="button button-outline" onClick={() => void handleExport()} disabled={exportingArchive}><ArrowDownToLine size={16} /> {exportingArchive ? exportStatus : 'Export project ZIP'}</button>
         <button className="button button-primary" onClick={() => setShowPublish(true)}><Globe2 size={16} /> Build for web <ChevronDown size={14} /></button>
       </div>
-      <input ref={importRef} className="visually-hidden" type="file" accept=".json,application/json" onChange={(e) => handleImport(e.target.files?.[0])} />
+      <input ref={importRef} className="visually-hidden" type="file" accept=".zip,.360studio.json,.json,application/zip,application/json" onChange={(e) => handleImport(e.target.files?.[0])} />
     </header>
 
     <div className="workspace">
@@ -192,7 +213,7 @@ export default function App() {
       <main className="editor-main">
         <div className="editor-toolbar"><div className="breadcrumb">Experience <span>/</span> <strong>{activeScene?.name ?? 'No scene selected'}</strong></div><div className="toolbar-right"><span className="draft-chip"><span /> {previewMode ? 'PREVIEW' : 'DRAFT'}</span><button className={`button button-quiet small ${previewMode ? 'preview-active' : ''}`} onClick={() => { setPreviewMode((value) => !value); setPlacingHotspot(false); }}><MonitorPlay size={15} /> {previewMode ? 'Exit preview' : 'Preview'}</button></div></div>
         <div className="canvas-area"><div className={`canvas-frame ${placingHotspot ? 'hotspot-placement' : ''}`}>
-          {activeScene ? <PanoramaCanvas scene={activeScene} placementMode={placingHotspot && !previewMode} onPlaceHotspot={placeHotspot} onHotspotAction={activateHotspot} /> : null}
+          {activeScene ? <PanoramaCanvas scene={activeScene} assets={project.assets} placementMode={placingHotspot && !previewMode} onPlaceHotspot={placeHotspot} onHotspotAction={activateHotspot} /> : null}
           {!activeScene?.panoramaUrl && !activeScene?.tiledPanorama && <div className="empty-panorama"><div className="orbit orbit-one"/><div className="orbit orbit-two"/><div className="orbit-center"><Aperture size={38} strokeWidth={1.2} /></div><div className="empty-copy"><span className="eyebrow">SCENE CANVAS</span><h2>Your world starts here.</h2><p>Add an equirectangular panorama to explore the scene in full 360°.</p><button className="button button-primary" onClick={() => panoramaRef.current?.click()}><Plus size={16} /> Add panorama</button><div className="file-hint">JPG, PNG, WEBP · Original file retained in browser storage</div></div></div>}
           <input ref={panoramaRef} className="visually-hidden" type="file" accept="image/jpeg,image/png,image/webp" onChange={(e) => void addPanorama(e.target.files?.[0])} />
           <div className="canvas-corner top-left"><span className="live-dot" /> {previewMode ? 'TOUR PREVIEW' : placingHotspot ? 'CLICK TO PLACE HOTSPOT' : '360° EDITOR CANVAS'}</div><div className="canvas-corner top-right"><span>360°</span><span className="corner-divider" /> <span>{activeScene?.tiledPanorama ? 'TILE STREAMING' : 'SPHERICAL VIEW'}</span></div>
@@ -212,7 +233,7 @@ export default function App() {
     </div>
     {notice && <div className="toast" role="status"><span className="toast-icon"><Check size={15} /></span>{notice}<button aria-label="Dismiss notification" onClick={() => setNotice('')}><X size={14} /></button></div>}
     {selectedHotspot && <div className="modal-backdrop" onClick={() => setSelectedHotspot(null)}><div className="hotspot-modal" onClick={(e) => e.stopPropagation()}><button className="modal-close" onClick={() => setSelectedHotspot(null)} aria-label="Close hotspot"><X size={17} /></button><div className="eyebrow">{selectedHotspot.kind.toUpperCase()} HOTSPOT</div><h2>{selectedHotspot.title}</h2>{selectedHotspot.kind === 'image' && selectedMediaUrl && <img className="hotspot-media-image" src={selectedMediaUrl} alt={selectedHotspot.title} />}{selectedHotspot.kind === 'video' && selectedMediaUrl && <video className="hotspot-media-video" src={selectedMediaUrl} controls playsInline />}{selectedHotspot.kind === 'audio' && selectedMediaUrl && <audio className="hotspot-media-audio" src={selectedMediaUrl} controls />}{selectedHotspot.kind === 'info' && <p className="hotspot-modal-copy">This information hotspot is ready to be expanded with rich text and branded content in a later phase.</p>}{['image', 'video', 'audio'].includes(selectedHotspot.kind) && !selectedMediaUrl && <p className="hotspot-modal-copy">Add a direct media URL in the Inspector to preview this hotspot. Uploaded asset linking will follow in the Media Library phase.</p>}{selectedMediaUrl?.startsWith('http') && <a className="hotspot-external-link" href={selectedMediaUrl} target="_blank" rel="noreferrer"><ExternalLink size={14} /> Open source in new tab</a>}</div></div>}
-    {showPublish && <div className="modal-backdrop" onClick={() => setShowPublish(false)}><div className="publish-modal" onClick={(e) => e.stopPropagation()}><div className="modal-icon"><Globe2 size={22} /></div><button className="modal-close" onClick={() => setShowPublish(false)} aria-label="Close"><X size={17} /></button><div className="eyebrow">PRODUCTION WORKFLOW</div><h2>Build for the web</h2><p>The editor now supports hosted multi-resolution equirectangular tile manifests. The local processing script preserves your original image and creates preview and tile levels. A standalone public player bundle is still being built.</p><div className="build-checklist"><span><Check size={15} /> Save / resume draft with local media</span><span><Check size={15} /> Export / import project configuration</span><span><Check size={15} /> Interactive 360° viewer and scene navigation</span><span><Check size={15} /> Multi-resolution tile manifest + viewer support</span><span className="pending"><span className="pending-dot" /> Standalone Nginx deployment bundle</span></div><button className="button button-primary full-width" onClick={() => { setShowPublish(false); setNotice('Production export is the next milestone after the viewer and asset pipeline.'); }}>Got it</button></div></div>}
+    {showPublish && <div className="modal-backdrop" onClick={() => setShowPublish(false)}><div className="publish-modal" onClick={(e) => e.stopPropagation()}><div className="modal-icon"><Globe2 size={22} /></div><button className="modal-close" onClick={() => setShowPublish(false)} aria-label="Close"><X size={17} /></button><div className="eyebrow">PRODUCTION WORKFLOW</div><h2>Build for the web</h2><p>The editor supports hosted multi-resolution panoramas and portable ZIP export/import with uploaded assets and tiled media bundled when the browser can access them. The standalone public player build and deployment workflow remain separate milestones.</p><div className="build-checklist"><span><Check size={15} /> Save / resume draft with local media</span><span><Check size={15} /> Export / import project configuration</span><span><Check size={15} /> Interactive 360° viewer and scene navigation</span><span><Check size={15} /> Multi-resolution tile manifest + viewer support</span><span className="pending"><span className="pending-dot" /> Standalone Nginx deployment bundle</span></div><button className="button button-primary full-width" onClick={() => { setShowPublish(false); setNotice('Production export is the next milestone after the viewer and asset pipeline.'); }}>Got it</button></div></div>}
     <footer className="bottom-status"><span><span className={`status-dot ${saveState}`} /> Workspace ready</span><span>360 Studio Demo <span className="footer-divider">/</span> v0.3.0</span><span>Project schema v1</span></footer>
   </div>;
 }
