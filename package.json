@@ -1,7 +1,7 @@
 {
   "name": "360-studio-fe-demo",
   "private": true,
-  "version": "0.11.0",
+  "version": "0.12.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -10,7 +10,10 @@
     "typecheck": "tsc -b --pretty",
     "prepare:panorama": "node scripts/prepare-panorama.mjs",
     "predev": "npm run build:player",
-    "build:player": "vite build --config vite.player.config.ts"
+    "build:player": "vite build --config vite.player.config.ts",
+    "test:qa": "node --test tests/*.test.mjs",
+    "qa:build": "node scripts/qa-production-build.mjs",
+    "qa:bundle": "node scripts/qa-standalone-bundle.mjs"
   },
   "dependencies": {
     "@photo-sphere-viewer/core": "^5.11.0",

@@ -164,3 +164,11 @@ The build script bundles the player runtime into the static editor output. ZIP64
 - Theme settings are optional additions to schema-v1 project settings, so existing projects continue using compatible defaults. They travel with project JSON/ZIP and production-tour exports.
 - The standalone player applies a small font allow-list and accepts only HTTP(S) logo URLs. Remote logos require their host to remain available to tour visitors.
 - This milestone customizes the viewer shell and popup sizing; advanced per-component layouts, fully custom navigation templates, and uploaded/local logo asset management remain future work.
+
+## Production QA & Reliability (v0.12.0)
+
+- Added dependency-free test suite (`npm run test:qa`) covering archive path safety, JSON parsing, manifest validation, and project reference integrity.
+- Added build output verification (`npm run qa:build`) for editor entry and standalone player runtime bundles.
+- Added standalone tour package inspection (`npm run qa:bundle -- <extracted-dir>`) validating extracted production ZIPs.
+- Added GitHub Actions workflow (`.github/workflows/production-quality.yml`) for automated CI quality checks.
+- Added comprehensive manual regression checklist (`docs/production-qa-checklist.md`) covering editor, hotspots, spatial media, audio, theme, browsers, and Nginx deployment.
