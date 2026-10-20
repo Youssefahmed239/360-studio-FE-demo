@@ -195,19 +195,52 @@ class StandaloneTourPlayer {
       const shape = 'tour-hotspot-' + (appearance.shape ?? 'pill');
       const symbol = hotspot.kind === 'navigation' ? '↗' : hotspot.kind === 'video' ? '▶' : hotspot.kind === 'audio' ? '♫' : hotspot.kind === 'image' ? '▧' : hotspot.kind === 'link' ? '↗' : hotspot.kind === 'page' ? '▣' : 'i';
       let html: string;
+      let elementLayer: HTMLElement | undefined;
       let width: number;
       let height: number;
       if (hotspot.spatialMedia?.enabled && (hotspot.kind === 'image' || hotspot.kind === 'video') && mediaUrl) {
         const mediaWidth = Math.max(96, Math.min(960, hotspot.spatialMedia?.width ?? 320));
         const mediaHeight = Math.max(64, Math.min(720, hotspot.spatialMedia?.height ?? 180));
+        const surface = document.createElement('div');
+        surface.className = hotspot.kind === 'image' ? 'tour-spatial-media tour-spatial-image' : 'tour-spatial-media tour-spatial-video';
+        surface.dataset.hotspotId = hotspot.id;
+        surface.style.width = mediaWidth + 'px';
+        surface.style.height = mediaHeight + 'px';
+        surface.style.background = 'transparent';
+        surface.style.border = '0';
+        surface.style.boxShadow = 'none';
+        surface.style.overflow = 'hidden';
+        surface.style.pointerEvents = 'auto';
         if (hotspot.kind === 'image') {
-          html = '<div class="tour-spatial-media tour-spatial-image" style="width:' + mediaWidth + 'px;height:' + mediaHeight + 'px"><img src="' + htmlEscape(mediaUrl) + '" alt="' + htmlEscape(hotspot.title) + '" /></div>';
+          const image = document.createElement('img');
+          image.src = mediaUrl;
+          image.alt = hotspot.title;
+          image.draggable = false;
+          image.style.width = '100%';
+          image.style.height = '100%';
+          image.style.objectFit = 'contain';
+          image.style.display = 'block';
+          image.style.background = 'transparent';
+          image.style.border = '0';
+          image.style.boxShadow = 'none';
+          surface.append(image);
         } else {
-          const autoplay = hotspot.spatialMedia?.autoplay ? ' autoplay' : '';
-          const loop = hotspot.spatialMedia?.loop ? ' loop' : '';
-          const muted = (hotspot.spatialMedia?.muted ?? true) ? ' muted' : '';
-          html = '<div class="tour-spatial-media tour-spatial-video" style="width:' + mediaWidth + 'px;height:' + mediaHeight + 'px"><video src="' + htmlEscape(mediaUrl) + '" width="' + mediaWidth + '" height="' + mediaHeight + '" controls playsinline' + autoplay + loop + muted + '></video></div>';
+          const video = document.createElement('video');
+          video.src = mediaUrl;
+          video.controls = true;
+          video.playsInline = true;
+          video.autoplay = Boolean(hotspot.spatialMedia?.autoplay);
+          video.loop = Boolean(hotspot.spatialMedia?.loop);
+          video.muted = hotspot.spatialMedia?.muted ?? true;
+          video.style.width = '100%';
+          video.style.height = '100%';
+          video.style.objectFit = 'contain';
+          video.style.display = 'block';
+          video.style.background = '#080b10';
+          surface.append(video);
         }
+        elementLayer = surface;
+        html = '<div class="tour-spatial-fallback" data-hotspot-id="' + htmlEscape(hotspot.id) + '"></div>';
         width = mediaWidth; height = mediaHeight;
       } else if (hidden) {
         // Zero-opacity markup retains a click target without exposing an icon or tooltip to visitors.
@@ -220,9 +253,16 @@ class StandaloneTourPlayer {
         html = `<div class="tour-hotspot tour-hotspot-custom ${shape} ${animation}" style="--hotspot-color:${color};--hotspot-size:${size}px"><span>${symbol}</span>${showLabel ? `<strong>${htmlEscape(hotspot.title)}</strong>` : ''}</div>`;
         width = showLabel ? Math.max(76, Math.min(210, hotspot.title.length * 7 + 42)) : size; height = Math.max(size, showLabel ? 34 : size);
       }
+      html = html.replace('<div class="tour-', '<div data-hotspot-id="' + htmlEscape(hotspot.id) + '" class="tour-');
+      const spatialRotation = hotspot.spatialMedia?.enabled ? {
+        yaw: `${hotspot.spatialMedia.rotationYawDeg ?? 0}deg`,
+        pitch: `${hotspot.spatialMedia.rotationPitchDeg ?? 0}deg`,
+        roll: `${hotspot.spatialMedia.rotationRollDeg ?? 0}deg`,
+      } : { roll: `${appearance.rotationDeg ?? 0}deg` };
       return {
-        id: hotspot.id, html, size: { width, height }, anchor: 'center center',
+        id: hotspot.id, ...(elementLayer ? { elementLayer } : { html }), size: { width, height }, anchor: 'center center',
         position: { yaw: `${hotspot.yaw}deg`, pitch: `${hotspot.pitch}deg` },
+        rotation: spatialRotation,
         ...(!hidden && showLabel ? { tooltip: { content: htmlEscape(hotspot.title), position: 'top' } } : {}),
         data: { hotspotId: hotspot.id },
       };
@@ -521,3 +561,5 @@ else void boot();
 /* 360-STUDIO-HOTSPOTS-V0.6.1 */
 
 /* 360-STUDIO-SPATIAL-MEDIA-AUDIO-V0.7.0 */
+
+/* 360-STUDIO-HOTSPOT-SPATIAL-TRANSFORMS-V0.8.0 */

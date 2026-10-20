@@ -15,6 +15,8 @@ export interface HotspotAppearance {
   showLabel?: boolean;
   imageAssetId?: string;
   imageUrl?: string;
+  /** Roll rotation for a 2D image/GIF hotspot, in degrees. */
+  rotationDeg?: number;
 }
 
 /** One resolution band in a multi-resolution equirectangular panorama. */
@@ -66,6 +68,10 @@ export interface SpatialMediaSettings {
   loop?: boolean;
   /** Defaults to true for autoplay compatibility. */
   muted?: boolean;
+  /** 3D surface orientation; applied by the viewer in degrees. */
+  rotationYawDeg?: number;
+  rotationPitchDeg?: number;
+  rotationRollDeg?: number;
 }
 
 export interface TourScene {
@@ -106,3 +112,5 @@ export interface TourProject {
 /* 360-STUDIO-HOTSPOTS-V0.6.1 */
 
 /* 360-STUDIO-SPATIAL-MEDIA-AUDIO-V0.7.0 */
+
+/* 360-STUDIO-HOTSPOT-SPATIAL-TRANSFORMS-V0.8.0 */

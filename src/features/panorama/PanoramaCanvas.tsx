@@ -12,6 +12,8 @@ type Props = {
   assets: TourAsset[];
   placementMode: boolean;
   previewMode: boolean;
+  moveHotspotId: string | null;
+  onMoveHotspot: (hotspotId: string, yaw: number, pitch: number) => void;
   onPlaceHotspot: (yaw: number, pitch: number) => void;
   onHotspotAction: (hotspot: TourHotspot) => void;
 };
@@ -19,6 +21,7 @@ type Props = {
 type ViewerMarker = { id: string; data?: { hotspotId?: string } };
 type MarkerPlugin = {
   setMarkers: (markers: Array<Record<string, unknown>>) => void;
+  updateMarker: (marker: Record<string, unknown>) => void;
   addEventListener: (name: 'select-marker', callback: (event: { marker: ViewerMarker }) => void) => void;
 };
 
@@ -47,19 +50,52 @@ function makeMarkers(hotspots: TourHotspot[], assets: TourAsset[], previewMode: 
     const shape = 'studio-pano-marker-' + (appearance.shape ?? 'pill');
     const symbol = hotspot.kind === 'navigation' ? '↗' : hotspot.kind === 'video' ? '▶' : hotspot.kind === 'audio' ? '♫' : hotspot.kind === 'image' ? '▧' : hotspot.kind === 'link' ? '↗' : hotspot.kind === 'page' ? '▣' : 'i';
     let html: string;
+    let elementLayer: HTMLElement | undefined;
     let width: number;
     let height: number;
     if (hotspot.spatialMedia?.enabled && (hotspot.kind === 'image' || hotspot.kind === 'video') && mediaUrl) {
       const mediaWidth = Math.max(96, Math.min(960, hotspot.spatialMedia?.width ?? 320));
       const mediaHeight = Math.max(64, Math.min(720, hotspot.spatialMedia?.height ?? 180));
+      const surface = document.createElement('div');
+      surface.className = hotspot.kind === 'image' ? 'studio-spatial-media studio-spatial-image' : 'studio-spatial-media studio-spatial-video';
+      surface.dataset.hotspotId = hotspot.id;
+      surface.style.width = mediaWidth + 'px';
+      surface.style.height = mediaHeight + 'px';
+      surface.style.background = 'transparent';
+      surface.style.border = '0';
+      surface.style.boxShadow = 'none';
+      surface.style.overflow = 'hidden';
+      surface.style.pointerEvents = 'auto';
       if (hotspot.kind === 'image') {
-        html = '<div class="studio-spatial-media studio-spatial-image" style="width:' + mediaWidth + 'px;height:' + mediaHeight + 'px"><img src="' + escapeHtml(mediaUrl) + '" alt="' + escapeHtml(hotspot.title) + '" /></div>';
+        const image = document.createElement('img');
+        image.src = mediaUrl;
+        image.alt = hotspot.title;
+        image.draggable = false;
+        image.style.width = '100%';
+        image.style.height = '100%';
+        image.style.objectFit = 'contain';
+        image.style.display = 'block';
+        image.style.background = 'transparent';
+        image.style.border = '0';
+        image.style.boxShadow = 'none';
+        surface.append(image);
       } else {
-        const autoplay = hotspot.spatialMedia?.autoplay ? ' autoplay' : '';
-        const loop = hotspot.spatialMedia?.loop ? ' loop' : '';
-        const muted = (hotspot.spatialMedia?.muted ?? true) ? ' muted' : '';
-        html = '<div class="studio-spatial-media studio-spatial-video" style="width:' + mediaWidth + 'px;height:' + mediaHeight + 'px"><video src="' + escapeHtml(mediaUrl) + '" width="' + mediaWidth + '" height="' + mediaHeight + '" controls playsinline' + autoplay + loop + muted + '></video></div>';
+        const video = document.createElement('video');
+        video.src = mediaUrl;
+        video.controls = true;
+        video.playsInline = true;
+        video.autoplay = Boolean(hotspot.spatialMedia?.autoplay);
+        video.loop = Boolean(hotspot.spatialMedia?.loop);
+        video.muted = hotspot.spatialMedia?.muted ?? true;
+        video.style.width = '100%';
+        video.style.height = '100%';
+        video.style.objectFit = 'contain';
+        video.style.display = 'block';
+        video.style.background = '#080b10';
+        surface.append(video);
       }
+      elementLayer = surface;
+      html = '<div class="studio-spatial-fallback" data-hotspot-id="' + escapeHtml(hotspot.id) + '"></div>';
       width = mediaWidth; height = mediaHeight;
     } else if (hidden && previewMode) {
       // Keep an actual marker hit-area, but draw no pixels in preview or the published tour.
@@ -76,9 +112,16 @@ function makeMarkers(hotspots: TourHotspot[], assets: TourAsset[], previewMode: 
       html = `<div class="studio-pano-marker studio-pano-marker-custom ${shape} ${animation}" style="--hotspot-color:${color};--hotspot-size:${size}px"><span class="studio-pano-marker-icon">${symbol}</span>${showLabel ? `<span class="studio-pano-marker-label">${escapeHtml(hotspot.title)}</span>` : ''}</div>`;
       width = showLabel ? Math.max(90, Math.min(190, hotspot.title.length * 7 + 44)) : size; height = Math.max(size, showLabel ? 34 : size);
     }
+    html = html.replace('<div class="studio-', '<div data-hotspot-id="' + escapeHtml(hotspot.id) + '" class="studio-');
+    const spatialRotation = hotspot.spatialMedia?.enabled ? {
+      yaw: `${hotspot.spatialMedia.rotationYawDeg ?? 0}deg`,
+      pitch: `${hotspot.spatialMedia.rotationPitchDeg ?? 0}deg`,
+      roll: `${hotspot.spatialMedia.rotationRollDeg ?? 0}deg`,
+    } : { roll: `${appearance.rotationDeg ?? 0}deg` };
     return {
-      id: hotspot.id, html, anchor: 'center center', size: { width, height },
+      id: hotspot.id, ...(elementLayer ? { elementLayer } : { html }), anchor: 'center center', size: { width, height },
       position: { yaw: `${hotspot.yaw}deg`, pitch: `${hotspot.pitch}deg` },
+      rotation: spatialRotation,
       ...(!hidden && showLabel ? { tooltip: { content: escapeHtml(hotspot.title), position: 'top' } } : {}),
       data: { hotspotId: hotspot.id },
     };
@@ -116,15 +159,15 @@ function panoramaInput(scene: TourScene, assetUrls: Map<string, string>): string
   return scene.tiledPanorama ? makeTiledPanorama(scene.tiledPanorama, assetUrls) : scene.panoramaUrl!;
 }
 
-export default function PanoramaCanvas({ scene, assets, placementMode, previewMode, onPlaceHotspot, onHotspotAction }: Props) {
+export default function PanoramaCanvas({ scene, assets, placementMode, previewMode, moveHotspotId, onMoveHotspot, onPlaceHotspot, onHotspotAction }: Props) {
   const hostRef = useRef<HTMLDivElement>(null);
   const viewerRef = useRef<Viewer | null>(null);
   const pluginRef = useRef<MarkerPlugin | null>(null);
   const lastPanoramaRef = useRef<string | null>(null);
   const lastSceneIdRef = useRef<string | null>(null);
   const transitionSequenceRef = useRef(0);
-  const latestRef = useRef({ placementMode, onPlaceHotspot, onHotspotAction, hotspots: scene.hotspots });
-  latestRef.current = { placementMode, onPlaceHotspot, onHotspotAction, hotspots: scene.hotspots };
+  const latestRef = useRef({ placementMode, moveHotspotId, onMoveHotspot, onPlaceHotspot, onHotspotAction, hotspots: scene.hotspots });
+  latestRef.current = { placementMode, moveHotspotId, onMoveHotspot, onPlaceHotspot, onHotspotAction, hotspots: scene.hotspots };
   const assetUrls = new Map<string, string>();
   for (const asset of assets) if (asset.url) assetUrls.set(asset.id, asset.url);
 
@@ -180,6 +223,69 @@ export default function PanoramaCanvas({ scene, assets, placementMode, previewMo
     // handled by setPanorama below so the viewer can perform a configured transition.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hasPanorama, adapterMode, assets]);
+
+  useEffect(() => {
+    const host = hostRef.current;
+    const viewer = viewerRef.current;
+    const plugin = pluginRef.current;
+    if (!host || !viewer || !plugin || !moveHotspotId) return;
+    let drag: { hotspotId: string; pointerId: number; yaw: number; pitch: number; startYaw: number; startPitch: number } | null = null;
+    const coordsFor = (event: PointerEvent) => {
+      const rect = host.getBoundingClientRect();
+      const x = Math.max(0, Math.min(rect.width, event.clientX - rect.left));
+      const y = Math.max(0, Math.min(rect.height, event.clientY - rect.top));
+      const position = viewer.dataHelper.viewerCoordsToSphericalCoords({ x, y });
+      return { yaw: normalizeYaw(degrees(position.yaw)), pitch: Math.max(-89.9, Math.min(89.9, degrees(position.pitch))) };
+    };
+    const onPointerDown = (event: PointerEvent) => {
+      if (event.button !== 0) return;
+      const target = event.target;
+      if (!(target instanceof Element)) return;
+      const marker = target.closest<HTMLElement>('[data-hotspot-id]');
+      const hotspotId = marker?.dataset.hotspotId;
+      if (!hotspotId || hotspotId !== latestRef.current.moveHotspotId) return;
+      const current = latestRef.current.hotspots.find((item) => item.id === hotspotId);
+      if (!current) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      drag = { hotspotId, pointerId: event.pointerId, yaw: current.yaw, pitch: current.pitch, startYaw: current.yaw, startPitch: current.pitch };
+      try { host.setPointerCapture(event.pointerId); } catch { /* pointer capture may not be supported in a browser */ }
+    };
+    const onPointerMove = (event: PointerEvent) => {
+      if (!drag || drag.pointerId !== event.pointerId) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      try {
+        const point = coordsFor(event);
+        drag.yaw = point.yaw;
+        drag.pitch = point.pitch;
+        plugin.updateMarker({ id: drag.hotspotId, position: { yaw: point.yaw + 'deg', pitch: point.pitch + 'deg' } });
+      } catch { /* Ignore coordinates outside the active panorama projection. */ }
+    };
+    const finishDrag = (event: PointerEvent, commit: boolean) => {
+      if (!drag || drag.pointerId !== event.pointerId) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      const finalDrag = drag;
+      drag = null;
+      try { if (host.hasPointerCapture(event.pointerId)) host.releasePointerCapture(event.pointerId); } catch { /* no-op */ }
+      if (commit && (Math.abs(finalDrag.yaw - finalDrag.startYaw) > 0.1 || Math.abs(finalDrag.pitch - finalDrag.startPitch) > 0.1)) {
+        latestRef.current.onMoveHotspot(finalDrag.hotspotId, finalDrag.yaw, finalDrag.pitch);
+      }
+    };
+    const onPointerUp = (event: PointerEvent) => finishDrag(event, true);
+    const onPointerCancel = (event: PointerEvent) => finishDrag(event, false);
+    host.addEventListener('pointerdown', onPointerDown, true);
+    host.addEventListener('pointermove', onPointerMove, true);
+    host.addEventListener('pointerup', onPointerUp, true);
+    host.addEventListener('pointercancel', onPointerCancel, true);
+    return () => {
+      host.removeEventListener('pointerdown', onPointerDown, true);
+      host.removeEventListener('pointermove', onPointerMove, true);
+      host.removeEventListener('pointerup', onPointerUp, true);
+      host.removeEventListener('pointercancel', onPointerCancel, true);
+    };
+  }, [hasPanorama, adapterMode, assets, moveHotspotId]);
 
   useEffect(() => {
     const viewer = viewerRef.current;
@@ -245,3 +351,5 @@ export default function PanoramaCanvas({ scene, assets, placementMode, previewMo
 /* 360-STUDIO-HOTSPOTS-V0.6.1 */
 
 /* 360-STUDIO-SPATIAL-MEDIA-AUDIO-V0.7.0 */
+
+/* 360-STUDIO-HOTSPOT-SPATIAL-TRANSFORMS-V0.8.0 */

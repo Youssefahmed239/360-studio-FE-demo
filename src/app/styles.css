@@ -76,3 +76,14 @@
 .hotspot-spatial-settings{margin-top:13px;padding-top:13px;border-top:1px solid #2c3744;}
 .audio-timing-grid{display:grid;grid-template-columns:1fr 1fr;gap:9px;margin:13px 0;}
 .audio-timing-grid .text-field{margin-top:7px;}
+
+.hotspot-transform-controls{margin-top:13px;padding-top:13px;border-top:1px solid #2c3744;}
+.hotspot-transform-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:9px;}
+.hotspot-transform-grid.three-columns{grid-template-columns:repeat(3,minmax(0,1fr));}
+.hotspot-transform-grid .text-field{margin-top:6px;min-width:0;padding:8px 6px;}
+.hotspot-move-button{width:100%;margin-top:10px;min-height:31px;}
+.hotspot-move-button.active{border-color:#a3e635;background:#26391e;color:#eaffd8;}
+.hotspot-spatial-orientation{margin-top:12px;padding-top:11px;border-top:1px solid #2c3744;}
+.hotspot-moving .psv-marker{cursor:grab!important;}
+.hotspot-moving .psv-marker:active{cursor:grabbing!important;}
+/* 360-STUDIO-HOTSPOT-SPATIAL-TRANSFORMS-V0.8.0 */

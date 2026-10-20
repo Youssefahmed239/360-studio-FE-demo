@@ -132,3 +132,10 @@ The build script bundles the player runtime into the static editor output. ZIP64
 - Scene ambience supports a source offset, delayed start, stop-after duration, fade-in and fade-out, plus loop and volume. Browsers may require a visitor gesture before sound is allowed.
 - New spatial and audio settings are optional properties in the schema-v1 project, so older project files remain readable.
 - The editor and standalone production player share these behaviours. Verify a freshly exported production bundle before deploying it.
+
+## Hotspot transform controls (v0.8.0)
+
+- Hotspots can be repositioned by dragging the active marker in the editor, or by entering exact spherical yaw/pitch angles.
+- 2D hotspot image/GIF markers support roll rotation. Spatial image/video elements use a 3D HTML marker layer with yaw, pitch, and roll orientation, plus width/height settings.
+- The position and orientation values are optional schema-v1 properties; prior projects remain compatible.
+- New marker transforms are emitted into the standalone production player. Rebuild and test a fresh production ZIP after editing.
