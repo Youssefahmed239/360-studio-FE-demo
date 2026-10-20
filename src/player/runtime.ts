@@ -14,7 +14,6 @@ interface RuntimeProject extends Omit<TourProject, 'scenes'> { scenes: RuntimeSc
 interface MarkerApi {
   setMarkers(markers: Array<Record<string, unknown>>): void;
   addEventListener(name: 'select-marker', callback: (event: { marker: { id: string; data?: { hotspotId?: string } } }) => void): void;
-  getMarker(id: string): { threeElement: { position: { x: number; y: number; z: number } } };
 }
 
 const htmlEscape = (value: string): string => value.replace(/[&<>"']/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character] ?? character);
@@ -254,21 +253,19 @@ class StandaloneTourPlayer {
         html = `<div class="tour-hotspot tour-hotspot-custom ${shape} ${animation}" style="--hotspot-color:${color};--hotspot-size:${size}px"><span>${symbol}</span>${showLabel ? `<strong>${htmlEscape(hotspot.title)}</strong>` : ''}</div>`;
         width = showLabel ? Math.max(76, Math.min(210, hotspot.title.length * 7 + 42)) : size; height = Math.max(size, showLabel ? 34 : size);
       }
-      if (!elementLayer && Math.abs(hotspot.depth ?? 0) > 0.001) {
-        const depthSurface = document.createElement('div');
-        depthSurface.className = 'tour-depth-hotspot';
-        depthSurface.dataset.hotspotId = hotspot.id;
-        depthSurface.style.width = width + 'px';
-        depthSurface.style.height = height + 'px';
-        depthSurface.style.background = 'transparent';
-        depthSurface.style.border = '0';
-        depthSurface.style.boxShadow = 'none';
-        depthSurface.style.overflow = 'visible';
-        depthSurface.style.pointerEvents = 'auto';
-        depthSurface.innerHTML = html;
-        elementLayer = depthSurface;
-      }
       html = html.replace('<div class="tour-', '<div data-hotspot-id="' + htmlEscape(hotspot.id) + '" class="tour-');
+    const rawScaleX = Number(hotspot.scaleX ?? 1);
+    const rawScaleY = Number(hotspot.scaleY ?? 1);
+    const scaleX = Number.isFinite(rawScaleX) ? Math.max(0.1, Math.min(4, rawScaleX)) : 1;
+    const scaleY = Number.isFinite(rawScaleY) ? Math.max(0.1, Math.min(4, rawScaleY)) : 1;
+    const scaleTransform = `scale(${scaleX}, ${scaleY})`;
+    if (elementLayer) {
+      elementLayer.style.transform = scaleTransform;
+      elementLayer.style.transformOrigin = 'center center';
+    } else {
+      html = html.replace(/class="(tour-[^"]+)"/, (_match, className: string) =>
+        `class="${className}" style="transform:${scaleTransform};transform-origin:center center;"`);
+    }
       const spatialRotation = hotspot.spatialMedia?.enabled ? {
         yaw: `${hotspot.spatialMedia.rotationYawDeg ?? 0}deg`,
         pitch: `${hotspot.spatialMedia.rotationPitchDeg ?? 0}deg`,
@@ -282,24 +279,6 @@ class StandaloneTourPlayer {
         data: { hotspotId: hotspot.id },
       };
     });
-  }
-
-
-  private applyMarkerDepth(hotspots: TourHotspot[]): void {
-    if (!this.markerPlugin) return;
-    for (const hotspot of hotspots) {
-      const depth = Math.max(-80, Math.min(70, Number(hotspot.depth ?? 0)));
-      if (Math.abs(depth) < 0.001) continue;
-      try {
-        const position = this.markerPlugin.getMarker(hotspot.id).threeElement.position;
-        const currentRadius = Math.hypot(position.x, position.y, position.z);
-        if (!Number.isFinite(currentRadius) || currentRadius < 0.001) continue;
-        const factor = (100 - depth) / currentRadius;
-        position.x *= factor;
-        position.y *= factor;
-        position.z *= factor;
-      } catch { /* Only depth-enabled CSS3D markers have a position that can be adjusted. */ }
-    }
   }
 
   private createViewer(scene: RuntimeScene, source: { mode: 'single' | 'tiles'; panorama: string | Record<string, unknown> }): void {
@@ -320,7 +299,6 @@ class StandaloneTourPlayer {
     this.viewer = new ViewerConstructor(options);
     this.adapterMode = source.mode;
     this.markerPlugin = this.viewer.getPlugin(MarkersPlugin) as unknown as MarkerApi;
-    this.applyMarkerDepth(scene.hotspots);
     this.markerPlugin.addEventListener('select-marker', ({ marker }) => {
       const hotspotId = marker.data?.hotspotId ?? marker.id;
       const hotspot = this.currentScene()?.hotspots.find((item) => item.id === hotspotId);
@@ -392,7 +370,6 @@ class StandaloneTourPlayer {
       }
       if (sequence !== this.transitionSequence) return;
       this.markerPlugin?.setMarkers(this.markersFor(scene));
-      this.applyMarkerDepth(scene.hotspots);
       loader.hidden = true;
     } catch (error) {
       if (sequence !== this.transitionSequence) return;
@@ -599,4 +576,4 @@ else void boot();
 
 /* 360-STUDIO-HOTSPOT-SPATIAL-TRANSFORMS-V0.8.0 */
 
-/* 360-STUDIO-SPATIAL-DEPTH-CONTROLS-V0.9.0 */
+/* 360-STUDIO-SCALE-CONTROLS-V0.9.1 */

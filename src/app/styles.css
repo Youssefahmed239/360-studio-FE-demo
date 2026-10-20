@@ -87,6 +87,6 @@
 .hotspot-moving .psv-marker{cursor:grab!important;}
 .hotspot-moving .psv-marker:active{cursor:grabbing!important;}
 /* 360-STUDIO-HOTSPOT-SPATIAL-TRANSFORMS-V0.8.0 */
-
-.studio-depth-hotspot{display:block;overflow:visible;background:transparent;border:0;box-shadow:none;pointer-events:auto;user-select:none;}
-/* 360-STUDIO-SPATIAL-DEPTH-CONTROLS-V0.9.0 */
+.hotspot-scale-controls{display:grid;gap:7px;margin-top:12px;padding-top:10px;border-top:1px solid #2c3744;}
+.hotspot-scale-controls .duration-label{margin-top:4px;}
+/* 360-STUDIO-SCALE-CONTROLS-V0.9.1 */

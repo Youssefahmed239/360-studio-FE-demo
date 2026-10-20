@@ -140,11 +140,10 @@ The build script bundles the player runtime into the static editor output. ZIP64
 - The position and orientation values are optional schema-v1 properties; prior projects remain compatible.
 - New marker transforms are emitted into the standalone production player. Rebuild and test a fresh production ZIP after editing.
 
-## Radial depth controls (v0.9.0)
+## Scale controls (v0.9.1)
 
-- Hotspots can be moved radially relative to the panorama shell using the Depth control.
-- Positive depth means closer to the viewer; negative depth means farther away; zero means on the panorama radius.
-- The editor uses Photo Sphere Viewer CSS3D marker elements and adjusts their 3D radial position after marker construction. The standalone player mirrors the same values.
-- Depth is saved as the optional schema-v1 `TourHotspot.depth` field and is included automatically in project and production exports.
-- The depth range is clamped from -80 to +70 relative units to keep elements from reaching the camera origin.
-- Rebuild and test the standalone production ZIP after changing depth.
+- Replaces radial Depth controls with independent horizontal Scale X and Scale Y sliders.
+- Slider range is 0.1× to 4×, with 1× as the default. Left shrinks; right enlarges.
+- Scale affects regular hotspots, image/GIF marker visuals, and spatial image/video element layers.
+- Values are optional schema-v1 fields `TourHotspot.scaleX` and `TourHotspot.scaleY`, so existing projects default to 1×.
+- The editor and standalone player use the same scale rendering. Build and test a fresh production ZIP after changing scale.
