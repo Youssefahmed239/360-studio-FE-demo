@@ -11,6 +11,7 @@ type Props = {
   scene: TourScene;
   assets: TourAsset[];
   placementMode: boolean;
+  previewMode: boolean;
   onPlaceHotspot: (yaw: number, pitch: number) => void;
   onHotspotAction: (hotspot: TourHotspot) => void;
 };
@@ -27,16 +28,48 @@ const escapeHtml = (value: string) => value.replace(/[&<>"']/g, (char) => ({
   '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
 }[char] ?? char));
 
-function makeMarkers(hotspots: TourHotspot[]) {
-  return hotspots.map((hotspot) => ({
-    id: hotspot.id,
-    html: `<div class="studio-pano-marker"><span class="studio-pano-marker-icon">${hotspot.kind === 'navigation' ? '↗' : hotspot.kind === 'video' ? '▶' : hotspot.kind === 'audio' ? '♫' : hotspot.kind === 'image' ? '▧' : 'i'}</span><span class="studio-pano-marker-label">${escapeHtml(hotspot.title)}</span></div>`,
-    anchor: 'center center',
-    size: { width: Math.max(90, Math.min(190, hotspot.title.length * 7 + 44)), height: 34 },
-    position: { yaw: `${hotspot.yaw}deg`, pitch: `${hotspot.pitch}deg` },
-    tooltip: { content: escapeHtml(hotspot.title), position: 'top' },
-    data: { hotspotId: hotspot.id },
-  }));
+function safeCssColor(value: string | undefined): string {
+  return value && /^#[0-9a-f]{6}$/i.test(value) ? value : '#a3e635';
+}
+
+function makeMarkers(hotspots: TourHotspot[], assets: TourAsset[], previewMode: boolean) {
+  const assetUrls = new Map<string, string>(assets.filter((asset) => asset.url).map((asset) => [asset.id, asset.url!] as const));
+  return hotspots.map((hotspot) => {
+    const appearance = hotspot.appearance ?? {};
+    const mode = appearance.mode ?? 'default';
+    const size = Math.max(24, Math.min(96, appearance.size ?? 36));
+    const color = safeCssColor(appearance.color);
+    const hidden = mode === 'invisible';
+    const imageUrl = (appearance.imageAssetId ? assetUrls.get(appearance.imageAssetId) : undefined) ?? appearance.imageUrl;
+    const showLabel = appearance.showLabel !== false;
+    const animation = appearance.animation && appearance.animation !== 'none' ? 'studio-pano-marker-' + appearance.animation : '';
+    const shape = 'studio-pano-marker-' + (appearance.shape ?? 'pill');
+    const symbol = hotspot.kind === 'navigation' ? '↗' : hotspot.kind === 'video' ? '▶' : hotspot.kind === 'audio' ? '♫' : hotspot.kind === 'image' ? '▧' : hotspot.kind === 'link' ? '↗' : hotspot.kind === 'page' ? '▣' : 'i';
+    let html: string;
+    let width: number;
+    let height: number;
+    if (hidden && previewMode) {
+      // Keep an actual marker hit-area, but draw no pixels in preview or the published tour.
+      html = `<div class="studio-pano-marker-invisible-hit" style="width:${size}px;height:${size}px" aria-label="${escapeHtml(hotspot.title)}"></div>`;
+      width = size; height = size;
+    } else if (hidden) {
+      // Editor-only locator so invisible clickable regions can still be found and edited.
+      html = `<div class="studio-pano-marker studio-pano-marker-hidden-edit" style="--hotspot-color:${color};width:${size + 48}px;height:${size}px"><span>◉</span><small>Hidden target</small></div>`;
+      width = size + 48; height = size;
+    } else if (mode === 'image' && imageUrl) {
+      html = `<div class="studio-pano-marker studio-pano-marker-image ${animation}" style="--hotspot-color:${color};--hotspot-size:${size}px;width:${size}px;height:${size + (showLabel ? 20 : 0)}px"><img src="${escapeHtml(imageUrl)}" alt="" />${showLabel ? `<span class="studio-pano-marker-label">${escapeHtml(hotspot.title)}</span>` : ''}</div>`;
+      width = Math.max(size, showLabel ? Math.min(190, hotspot.title.length * 7 + 12) : size); height = size + (showLabel ? 20 : 0);
+    } else {
+      html = `<div class="studio-pano-marker studio-pano-marker-custom ${shape} ${animation}" style="--hotspot-color:${color};--hotspot-size:${size}px"><span class="studio-pano-marker-icon">${symbol}</span>${showLabel ? `<span class="studio-pano-marker-label">${escapeHtml(hotspot.title)}</span>` : ''}</div>`;
+      width = showLabel ? Math.max(90, Math.min(190, hotspot.title.length * 7 + 44)) : size; height = Math.max(size, showLabel ? 34 : size);
+    }
+    return {
+      id: hotspot.id, html, anchor: 'center center', size: { width, height },
+      position: { yaw: `${hotspot.yaw}deg`, pitch: `${hotspot.pitch}deg` },
+      ...(!hidden && showLabel ? { tooltip: { content: escapeHtml(hotspot.title), position: 'top' } } : {}),
+      data: { hotspotId: hotspot.id },
+    };
+  });
 }
 
 function panoramaKey(scene: TourScene): string | null {
@@ -70,7 +103,7 @@ function panoramaInput(scene: TourScene, assetUrls: Map<string, string>): string
   return scene.tiledPanorama ? makeTiledPanorama(scene.tiledPanorama, assetUrls) : scene.panoramaUrl!;
 }
 
-export default function PanoramaCanvas({ scene, assets, placementMode, onPlaceHotspot, onHotspotAction }: Props) {
+export default function PanoramaCanvas({ scene, assets, placementMode, previewMode, onPlaceHotspot, onHotspotAction }: Props) {
   const hostRef = useRef<HTMLDivElement>(null);
   const viewerRef = useRef<Viewer | null>(null);
   const pluginRef = useRef<MarkerPlugin | null>(null);
@@ -100,7 +133,7 @@ export default function PanoramaCanvas({ scene, assets, placementMode, onPlaceHo
       minFov: 25,
       maxFov: 100,
       moveInertia: 0.72,
-      plugins: [[MarkersPlugin, { markers: makeMarkers(scene.hotspots) }]] as never,
+      plugins: [[MarkersPlugin, { markers: makeMarkers(scene.hotspots, assets, previewMode) }]] as never,
     };
     const viewer = scene.tiledPanorama
       ? new Viewer({ ...baseOptions, adapter: EquirectangularTilesAdapter, panorama: panoramaInput(scene, assetUrls) as never } as never)
@@ -186,8 +219,8 @@ export default function PanoramaCanvas({ scene, assets, placementMode, onPlaceHo
   useEffect(() => {
     const plugin = pluginRef.current;
     if (!plugin) return;
-    plugin.setMarkers(makeMarkers(scene.hotspots));
-  }, [scene.hotspots, scene.id]);
+    plugin.setMarkers(makeMarkers(scene.hotspots, assets, previewMode));
+  }, [scene.hotspots, scene.id, assets, previewMode]);
 
   return <div
     ref={hostRef}
@@ -195,3 +228,5 @@ export default function PanoramaCanvas({ scene, assets, placementMode, onPlaceHo
     aria-label={hasPanorama ? `Interactive 360-degree panorama: ${scene.name}` : '360-degree panorama canvas'}
   />;
 }
+
+/* 360-STUDIO-HOTSPOTS-V0.6.1 */

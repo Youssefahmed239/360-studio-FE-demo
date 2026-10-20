@@ -429,6 +429,11 @@ export async function exportProjectArchive(
       if (id) scene.audio = { ...scene.audio, assetId: id, url: undefined };
     }
     for (const hotspot of scene.hotspots) {
+      if (hotspot.appearance?.imageUrl && isHttpUrl(hotspot.appearance.imageUrl) && !hotspot.appearance.imageAssetId) {
+        const id = await addRemoteAsAsset(hotspot.appearance.imageUrl, `${hotspot.title || 'hotspot'} icon`, 'image');
+        if (id) hotspot.appearance = { ...hotspot.appearance, imageAssetId: id, imageUrl: undefined };
+      }
+      if (hotspot.kind === 'link' || hotspot.kind === 'page') continue;
       if (hotspot.url && isHttpUrl(hotspot.url) && !hotspot.assetId) {
         const id = await addRemoteAsAsset(hotspot.url, hotspot.title || `${hotspot.kind} media`, kindForMime('', hotspot.kind === 'navigation' ? 'image' : hotspot.kind === 'info' ? 'document' : hotspot.kind));
         if (id) { hotspot.assetId = id; hotspot.url = undefined; }

@@ -18,6 +18,7 @@ interface MarkerApi {
 
 const htmlEscape = (value: string): string => value.replace(/[&<>"']/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character] ?? character);
 const safeColor = (value: string | undefined): string => value && /^#[0-9a-f]{6}$/i.test(value) ? value : '#a3e635';
+function safeHttpUrl(value: string | undefined): string | undefined { try { const parsed = new URL(value ?? ''); return parsed.protocol === 'http:' || parsed.protocol === 'https:' ? parsed.href : undefined; } catch { return undefined; } }
 
 function isRecord(value: unknown): value is Record<string, unknown> { return typeof value === 'object' && value !== null && !Array.isArray(value); }
 function validateProject(value: unknown): RuntimeProject {
@@ -175,15 +176,38 @@ class StandaloneTourPlayer {
   }
 
   private markersFor(scene: RuntimeScene): Array<Record<string, unknown>> {
-    return scene.hotspots.map((hotspot) => ({
-      id: hotspot.id,
-      html: `<div class="tour-hotspot"><span>${hotspot.kind === 'navigation' ? '↗' : hotspot.kind === 'video' ? '▶' : hotspot.kind === 'audio' ? '♫' : hotspot.kind === 'image' ? '▧' : 'i'}</span><strong>${htmlEscape(hotspot.title)}</strong></div>`,
-      size: { width: Math.max(76, Math.min(210, hotspot.title.length * 7 + 42)), height: 34 },
-      anchor: 'center center',
-      position: { yaw: `${hotspot.yaw}deg`, pitch: `${hotspot.pitch}deg` },
-      tooltip: { content: htmlEscape(hotspot.title), position: 'top' },
-      data: { hotspotId: hotspot.id },
-    }));
+    return scene.hotspots.map((hotspot) => {
+      const appearance = hotspot.appearance ?? {};
+      const mode = appearance.mode ?? 'default';
+      const size = Math.max(24, Math.min(96, appearance.size ?? 36));
+      const color = safeColor(appearance.color);
+      const hidden = mode === 'invisible';
+      const imageUrl = this.assetUrl(appearance.imageAssetId) ?? appearance.imageUrl;
+      const showLabel = appearance.showLabel !== false;
+      const animation = appearance.animation && appearance.animation !== 'none' ? 'tour-hotspot-' + appearance.animation : '';
+      const shape = 'tour-hotspot-' + (appearance.shape ?? 'pill');
+      const symbol = hotspot.kind === 'navigation' ? '↗' : hotspot.kind === 'video' ? '▶' : hotspot.kind === 'audio' ? '♫' : hotspot.kind === 'image' ? '▧' : hotspot.kind === 'link' ? '↗' : hotspot.kind === 'page' ? '▣' : 'i';
+      let html: string;
+      let width: number;
+      let height: number;
+      if (hidden) {
+        // Zero-opacity markup retains a click target without exposing an icon or tooltip to visitors.
+        html = `<div class="tour-hotspot-invisible-hit" style="width:${size}px;height:${size}px" aria-label="${htmlEscape(hotspot.title)}"></div>`;
+        width = size; height = size;
+      } else if (mode === 'image' && imageUrl) {
+        html = `<div class="tour-hotspot tour-hotspot-image ${animation}" style="--hotspot-color:${color};--hotspot-size:${size}px;width:${size}px;height:${size + (showLabel ? 22 : 0)}px"><img src="${htmlEscape(imageUrl)}" alt="" />${showLabel ? `<strong class="tour-hotspot-image-label">${htmlEscape(hotspot.title)}</strong>` : ''}</div>`;
+        width = Math.max(size, showLabel ? Math.min(210, hotspot.title.length * 7 + 12) : size); height = size + (showLabel ? 22 : 0);
+      } else {
+        html = `<div class="tour-hotspot tour-hotspot-custom ${shape} ${animation}" style="--hotspot-color:${color};--hotspot-size:${size}px"><span>${symbol}</span>${showLabel ? `<strong>${htmlEscape(hotspot.title)}</strong>` : ''}</div>`;
+        width = showLabel ? Math.max(76, Math.min(210, hotspot.title.length * 7 + 42)) : size; height = Math.max(size, showLabel ? 34 : size);
+      }
+      return {
+        id: hotspot.id, html, size: { width, height }, anchor: 'center center',
+        position: { yaw: `${hotspot.yaw}deg`, pitch: `${hotspot.pitch}deg` },
+        ...(!hidden && showLabel ? { tooltip: { content: htmlEscape(hotspot.title), position: 'top' } } : {}),
+        data: { hotspotId: hotspot.id },
+      };
+    });
   }
 
   private createViewer(scene: RuntimeScene, source: { mode: 'single' | 'tiles'; panorama: string | Record<string, unknown> }): void {
@@ -289,6 +313,14 @@ class StandaloneTourPlayer {
 
   private mediaUrl(hotspot: TourHotspot): string | undefined { return this.assetUrl(hotspot.assetId) ?? hotspot.url; }
   private async activateHotspot(hotspot: TourHotspot): Promise<void> {
+    if (hotspot.kind === 'link') {
+      try {
+        const destination = new URL(hotspot.url ?? '');
+        if (!['http:', 'https:'].includes(destination.protocol)) throw new Error('Unsupported URL scheme');
+        window.open(destination.href, '_blank', 'noopener,noreferrer');
+      } catch { this.showError('This link hotspot needs a valid http:// or https:// destination.'); }
+      return;
+    }
     if (hotspot.kind === 'navigation' && hotspot.targetSceneId) {
       await this.loadScene(hotspot.targetSceneId);
       return;
@@ -300,22 +332,28 @@ class StandaloneTourPlayer {
     this.closeMedia();
     const popover = this.root.querySelector<HTMLElement>('.tour-popover-root')!;
     const backdrop = document.createElement('div'); backdrop.className = 'tour-modal-backdrop'; backdrop.addEventListener('click', () => this.closeMedia());
-    const panel = document.createElement('section'); panel.className = 'tour-media-modal'; panel.setAttribute('role', 'dialog'); panel.setAttribute('aria-modal', 'true'); panel.setAttribute('aria-label', hotspot.title);
+    const panel = document.createElement('section'); panel.className = hotspot.kind === 'page' ? 'tour-media-modal tour-page-modal' : 'tour-media-modal'; panel.setAttribute('role', 'dialog'); panel.setAttribute('aria-modal', 'true'); panel.setAttribute('aria-label', hotspot.title);
     const close = document.createElement('button'); close.className = 'tour-media-close'; close.type = 'button'; close.textContent = '×'; close.setAttribute('aria-label', 'Close'); close.addEventListener('click', () => this.closeMedia());
     const title = document.createElement('h2'); title.textContent = hotspot.title;
     panel.append(close, title);
     const url = this.mediaUrl(hotspot);
-    if (hotspot.kind === 'image' && url) {
+    const pageUrl = safeHttpUrl(url);
+    if (hotspot.kind === 'page' && pageUrl) {
+      const frame = document.createElement('iframe');
+      frame.src = pageUrl; frame.title = hotspot.title; frame.className = 'tour-media-page-frame';
+      frame.loading = 'lazy'; frame.referrerPolicy = 'strict-origin-when-cross-origin'; frame.allow = 'fullscreen; autoplay';
+      panel.append(frame);
+    } else if (hotspot.kind === 'image' && url) {
       const image = document.createElement('img'); image.src = url; image.alt = hotspot.title; image.className = 'tour-media-image'; panel.append(image);
     } else if (hotspot.kind === 'video' && url) {
       const video = document.createElement('video'); video.src = url; video.controls = true; video.playsInline = true; video.className = 'tour-media-video'; panel.append(video);
     } else if (hotspot.kind === 'audio' && url) {
       const audio = document.createElement('audio'); audio.src = url; audio.controls = true; audio.autoplay = false; audio.className = 'tour-media-audio'; panel.append(audio);
     } else {
-      const description = document.createElement('p'); description.textContent = url ? 'Open the media source using the control below.' : hotspot.kind === 'info' ? 'More information about this location.' : 'This media is not available in the exported bundle. Check the original URL or export permissions.'; panel.append(description);
+      const description = document.createElement('p'); description.textContent = hotspot.kind === 'page' ? (url ? 'This page may be blocked from embedding. Use Open page in a new tab below.' : 'Add a valid HTTP(S) URL for the page or document.') : url ? 'Open the media source using the control below.' : hotspot.kind === 'info' ? 'More information about this location.' : 'This media is not available in the exported bundle. Check the original URL or export permissions.'; panel.append(description);
     }
     if (url && /^https?:/i.test(url)) {
-      const external = document.createElement('a'); external.href = url; external.target = '_blank'; external.rel = 'noopener noreferrer'; external.className = 'tour-media-external'; external.textContent = 'Open media in a new tab'; panel.append(external);
+      const external = document.createElement('a'); external.href = url; external.target = '_blank'; external.rel = 'noopener noreferrer'; external.className = 'tour-media-external'; external.textContent = hotspot.kind === 'page' ? 'Open page in a new tab' : 'Open media in a new tab'; panel.append(external);
     }
     panel.addEventListener('click', (event) => event.stopPropagation()); backdrop.append(panel); popover.append(backdrop); close.focus();
   }
@@ -382,3 +420,5 @@ async function boot(): Promise<void> {
 
 if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => void boot(), { once: true });
 else void boot();
+
+/* 360-STUDIO-HOTSPOTS-V0.6.1 */

@@ -1,5 +1,21 @@
-export type HotspotKind = 'navigation' | 'image' | 'video' | 'audio' | 'info';
+export type HotspotKind = 'navigation' | 'image' | 'video' | 'audio' | 'info' | 'link' | 'page';
 export type TransitionKind = 'fade' | 'fade-through-black' | 'zoom' | 'none';
+
+export type HotspotAppearanceMode = 'default' | 'image' | 'invisible';
+export type HotspotAnimation = 'none' | 'pulse' | 'bounce' | 'rotate';
+export type HotspotShape = 'pill' | 'circle' | 'square';
+
+/** Visual behaviour for an interactive point. Optional fields keep older schema-v1 projects compatible. */
+export interface HotspotAppearance {
+  mode?: HotspotAppearanceMode;
+  shape?: HotspotShape;
+  color?: string;
+  size?: number;
+  animation?: HotspotAnimation;
+  showLabel?: boolean;
+  imageAssetId?: string;
+  imageUrl?: string;
+}
 
 /** One resolution band in a multi-resolution equirectangular panorama. */
 export interface TiledPanoramaLevel {
@@ -36,6 +52,7 @@ export interface TourHotspot {
   targetSceneId?: string;
   assetId?: string;
   url?: string;
+  appearance?: HotspotAppearance;
 }
 
 export interface TourScene {
@@ -72,3 +89,5 @@ export interface TourProject {
   scenes: TourScene[];
   assets: TourAsset[];
 }
+
+/* 360-STUDIO-HOTSPOTS-V0.6.1 */

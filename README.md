@@ -117,3 +117,11 @@ npm run build
 ```
 
 The build script bundles the player runtime into the static editor output. ZIP64 is not supported; archives over the classic ZIP 4 GiB limit are rejected.
+
+## Customizable hotspots (v0.6.1)
+
+- Hotspots now support configurable shape, color, size, label visibility, and pulse/bounce/rotate animation.
+- Upload PNG, SVG, WebP or animated GIF marker art. Transparent pixels remain transparent, and marker CSS adds no chip background, border, or shadow. Use an image with alpha transparency; JPEG cannot store transparency. Uploaded icons are included in project archives and standalone tours when available to the archive collector.
+- Choose **Invisible clickable area** to hide a hotspot in Preview and the published tour while keeping a configurable click target. The editor displays a locator so hidden targets can still be found and adjusted.
+- Choose **Link** to open an HTTP(S) destination in a new tab, or **Web page / document** to display an HTTP(S) HTML page or browser-supported document (such as PDF) in an iframe overlay. A new-tab fallback is provided because some websites block iframe embedding with their own security headers.
+- The project schema stays at v1; all new appearance fields are optional so older projects continue to load.
