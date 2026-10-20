@@ -2,13 +2,14 @@
 
 An independent frontend starter for a customizable 360° tour authoring studio. This repository is intentionally separate from `360-studio-FE`.
 
-## Current foundation (v0.3.0)
+## Current foundation (v0.5.0)
 
 - Responsive editor shell with scene list, canvas, timeline, and inspector.
 - Interactive Photo Sphere Viewer canvas for uploaded equirectangular panoramas.
 - Scene navigation, transitions, editable spherical hotspots, and basic image/video/audio hotspot previews.
 - Local draft persistence and browser IndexedDB storage for uploaded panorama originals.
-- Import/export of versioned editable project JSON (configuration only; not yet a portable media archive).
+- Portable editable project ZIP import/export, including uploaded assets and tiled panoramas where the browser can collect them.
+- Standalone production tour ZIP containing the player runtime, project configuration, included media, and Nginx deployment notes.
 - Multi-resolution equirectangular tile adapter support with an initial low-resolution preview and resolution levels selected as the viewer zooms.
 - A local Node/Sharp CLI that preserves the input original and generates a base preview plus JPEG tile levels.
 - Relative Vite build paths (`base: './'`) for static hosting under an Nginx subpath.
@@ -76,7 +77,7 @@ npm run build
 npm run preview
 ```
 
-`dist/` is the Studio editor build. It is not yet the final standalone public tour player. The self-contained production tour export, asset validation, versioned deployment, and rollback flow remain future work.
+`dist/` contains the Studio editor and the generated `player-runtime/` bundle. **Build for web** downloads a separate production ZIP containing `index.html`, `tour-player.js`, `tour-player.css`, `project.json`, `archive-manifest.json`, and the assets that could be included. Extract that ZIP into a dedicated Nginx directory and serve over HTTP/HTTPS. The public tour is independent of the Studio editor; edits require generating and deploying a new ZIP. Versioned directories and CDN/media caching policy should be used for safe production updates.
 
 ## Architecture direction
 
@@ -97,3 +98,22 @@ The project schema uses stable IDs so a future portable archive and standalone p
 - Direct URL media is fetched into the archive if the browser has CORS access. Unfetchable URL media stays linked and is listed as an external dependency in archive-manifest.json.
 - ZIP64 is not implemented yet; archives larger than 4 GiB are rejected. Exporting remote high-resolution tiles requires every tile URL to be reachable from the Studio origin.
 - Asset binaries are written to IndexedDB in a single transaction on import. Project configuration and the active scene continue to use browser-local saving.
+
+
+## Standalone production tour (v0.5.0)
+
+1. Run `npm install` once. `npm run dev` first builds the standalone player runtime into ignored `public/player-runtime/`.
+2. Use the Studio editor and choose **Build for web → Build standalone tour (.zip)**. The exporter collects project media using the same CORS-aware archive pipeline as project ZIP export, then includes the prebuilt player JS/CSS and a deployment guide.
+3. Extract the downloaded `*-production.zip` into a dedicated server folder. Serve its `index.html` over HTTP or HTTPS; do not open it with `file://` because the player fetches JSON manifests.
+4. The bundle includes `project.json`, `archive-manifest.json`, `assets/`, and `tours/` with tiled previews and tile images when available. Its viewer resolves media by stable asset IDs.
+5. Assets blocked by CORS/authentication remain as external URLs and are listed in `archive-manifest.json`. Review these before sharing.
+
+Build commands:
+
+```bash
+npm run build:player
+npm run typecheck
+npm run build
+```
+
+The build script bundles the player runtime into the static editor output. ZIP64 is not supported; archives over the classic ZIP 4 GiB limit are rejected.

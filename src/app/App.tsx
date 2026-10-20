@@ -5,6 +5,7 @@ import { persistUploadedAsset, restoreUploadedAssetUrls } from '../features/asse
 import PanoramaCanvas from '../features/panorama/PanoramaCanvas';
 import { loadTiledPanoramaManifest } from '../features/panorama/panoramaManifest';
 import { exportProjectArchive, importProjectFile } from '../lib/portableProjectArchive';
+import { exportProductionTourBundle } from '../lib/productionTourBundle';
 import type { HotspotKind, TourHotspot, TourScene } from '../types/project';
 
 const statusText = { saved: 'All changes saved', unsaved: 'Unsaved changes', saving: 'Saving…', error: 'Save failed' } as const;
@@ -33,6 +34,8 @@ export default function App() {
   const [loadingTileManifest, setLoadingTileManifest] = useState(false);
   const [exportingArchive, setExportingArchive] = useState(false);
   const [exportStatus, setExportStatus] = useState('Preparing project ZIP…');
+  const [buildingProduction, setBuildingProduction] = useState(false);
+  const [productionStatus, setProductionStatus] = useState('Building tour…');
   const activeScene = project.scenes.find((scene) => scene.id === activeSceneId) ?? project.scenes[0];
 
   useEffect(() => { void load(); }, [load]);
@@ -130,6 +133,27 @@ export default function App() {
     } finally {
       setExportingArchive(false);
       setExportStatus('Preparing project ZIP…');
+    }
+  }
+
+  async function handleBuildProductionTour() {
+    if (buildingProduction) return;
+    setBuildingProduction(true);
+    setProductionStatus('Preparing standalone player…');
+    setShowPublish(false);
+    try {
+      const result = await exportProductionTourBundle(project, (progress) => {
+        if (progress.phase === 'downloading') setProductionStatus(progress.detail);
+        else if (progress.phase === 'packaging') setProductionStatus('Packaging production ZIP ' + progress.completed + '/' + progress.total);
+        else if (progress.phase === 'collecting') setProductionStatus(progress.detail);
+      });
+      setShowPublish(false);
+      setNotice('Standalone production tour downloaded (' + (result.totalBytes / (1024 * 1024)).toFixed(1) + ' MB).' + (result.externalDependencies.length ? ' ' + result.externalDependencies.length + ' external media URL(s) remain linked; see archive-manifest.json.' : ' Media that was accessible has been bundled.'));
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : 'Could not build the standalone tour.');
+    } finally {
+      setBuildingProduction(false);
+      setProductionStatus('Building tour…');
     }
   }
 
@@ -233,7 +257,7 @@ export default function App() {
     </div>
     {notice && <div className="toast" role="status"><span className="toast-icon"><Check size={15} /></span>{notice}<button aria-label="Dismiss notification" onClick={() => setNotice('')}><X size={14} /></button></div>}
     {selectedHotspot && <div className="modal-backdrop" onClick={() => setSelectedHotspot(null)}><div className="hotspot-modal" onClick={(e) => e.stopPropagation()}><button className="modal-close" onClick={() => setSelectedHotspot(null)} aria-label="Close hotspot"><X size={17} /></button><div className="eyebrow">{selectedHotspot.kind.toUpperCase()} HOTSPOT</div><h2>{selectedHotspot.title}</h2>{selectedHotspot.kind === 'image' && selectedMediaUrl && <img className="hotspot-media-image" src={selectedMediaUrl} alt={selectedHotspot.title} />}{selectedHotspot.kind === 'video' && selectedMediaUrl && <video className="hotspot-media-video" src={selectedMediaUrl} controls playsInline />}{selectedHotspot.kind === 'audio' && selectedMediaUrl && <audio className="hotspot-media-audio" src={selectedMediaUrl} controls />}{selectedHotspot.kind === 'info' && <p className="hotspot-modal-copy">This information hotspot is ready to be expanded with rich text and branded content in a later phase.</p>}{['image', 'video', 'audio'].includes(selectedHotspot.kind) && !selectedMediaUrl && <p className="hotspot-modal-copy">Add a direct media URL in the Inspector to preview this hotspot. Uploaded asset linking will follow in the Media Library phase.</p>}{selectedMediaUrl?.startsWith('http') && <a className="hotspot-external-link" href={selectedMediaUrl} target="_blank" rel="noreferrer"><ExternalLink size={14} /> Open source in new tab</a>}</div></div>}
-    {showPublish && <div className="modal-backdrop" onClick={() => setShowPublish(false)}><div className="publish-modal" onClick={(e) => e.stopPropagation()}><div className="modal-icon"><Globe2 size={22} /></div><button className="modal-close" onClick={() => setShowPublish(false)} aria-label="Close"><X size={17} /></button><div className="eyebrow">PRODUCTION WORKFLOW</div><h2>Build for the web</h2><p>The editor supports hosted multi-resolution panoramas and portable ZIP export/import with uploaded assets and tiled media bundled when the browser can access them. The standalone public player build and deployment workflow remain separate milestones.</p><div className="build-checklist"><span><Check size={15} /> Save / resume draft with local media</span><span><Check size={15} /> Export / import project configuration</span><span><Check size={15} /> Interactive 360° viewer and scene navigation</span><span><Check size={15} /> Multi-resolution tile manifest + viewer support</span><span className="pending"><span className="pending-dot" /> Standalone Nginx deployment bundle</span></div><button className="button button-primary full-width" onClick={() => { setShowPublish(false); setNotice('Production export is the next milestone after the viewer and asset pipeline.'); }}>Got it</button></div></div>}
-    <footer className="bottom-status"><span><span className={`status-dot ${saveState}`} /> Workspace ready</span><span>360 Studio Demo <span className="footer-divider">/</span> v0.3.0</span><span>Project schema v1</span></footer>
+    {showPublish && <div className="modal-backdrop" onClick={() => setShowPublish(false)}><div className="publish-modal" onClick={(e) => e.stopPropagation()}><div className="modal-icon"><Globe2 size={22} /></div><button className="modal-close" onClick={() => setShowPublish(false)} aria-label="Close"><X size={17} /></button><div className="eyebrow">PRODUCTION WORKFLOW</div><h2>Build for the web</h2><p>Build a standalone tour bundle with its own viewer runtime, project configuration, panoramas, hotspots, and included media. Extract the ZIP into an Nginx directory and share that URL; visitors will not see the Studio editor.</p><div className="build-checklist"><span><Check size={15} /> Save / resume draft with local media</span><span><Check size={15} /> Export / import project configuration</span><span><Check size={15} /> Interactive 360° viewer and scene navigation</span><span><Check size={15} /> Multi-resolution tile manifest + viewer support</span><span><Check size={15} /> Standalone player runtime + Nginx deployment ZIP</span></div><button className="button button-primary full-width" onClick={() => void handleBuildProductionTour()} disabled={buildingProduction}>{buildingProduction ? productionStatus : 'Build standalone tour (.zip)'}</button></div></div>}
+    <footer className="bottom-status"><span><span className={`status-dot ${saveState}`} /> Workspace ready</span><span>360 Studio Demo <span className="footer-divider">/</span> v0.5.0</span><span>Project schema v1</span></footer>
   </div>;
 }

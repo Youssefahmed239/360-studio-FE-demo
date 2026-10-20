@@ -57,6 +57,14 @@ interface ZipEntryInput {
   blob: Blob;
 }
 
+export interface ProjectArchiveExtraEntry { path: string; blob: Blob }
+
+export interface ProjectArchiveExportOptions {
+  download?: boolean;
+  filename?: string;
+  extraEntries?: ProjectArchiveExtraEntry[];
+}
+
 const crcTable = (() => {
   const table = new Uint32Array(256);
   for (let n = 0; n < 256; n += 1) {
@@ -346,7 +354,8 @@ function triggerEntriesFromRemoteUrl(url: string, label: string): Promise<Blob> 
 export async function exportProjectArchive(
   inputProject: TourProject,
   onProgress?: (value: ArchiveProgress) => void,
-): Promise<{ fileCount: number; totalBytes: number; externalDependencies: ExternalDependency[] }> {
+  options: ProjectArchiveExportOptions = {},
+): Promise<{ fileCount: number; totalBytes: number; externalDependencies: ExternalDependency[]; blob: Blob }> {
   const project = JSON.parse(JSON.stringify(stripTransientAssetUrls(inputProject))) as TourProject;
   const entries: ZipEntryInput[] = [];
   const fileRecords: ArchiveFileRecord[] = [];
@@ -549,12 +558,18 @@ export async function exportProjectArchive(
     '',
     'The original source files are preserved as stored. Tiled display images are derived assets.',
   ].join('\n');
-  entries.push({ path: README_FILE, blob: new Blob([readme], { type: 'text/plain' }) });
+  entries.push({ path: cleanZipPath(README_FILE), blob: new Blob([readme], { type: 'text/plain' }) });
+
+  for (const extraEntry of options.extraEntries ?? []) {
+    const safePath = cleanZipPath(extraEntry.path);
+    if (entries.some((entry) => entry.path === safePath)) throw new Error(`Production bundle contains a duplicate ZIP path: ${safePath}`);
+    entries.push({ path: safePath, blob: extraEntry.blob });
+  }
 
   onProgress?.({ phase: 'packaging', completed: 0, total: entries.length, detail: `Creating ZIP with ${entries.length} files` });
   const zipBlob = await createStoredZip(entries, onProgress);
-  downloadBlob(zipBlob, `${slugify(portableProject.name)}.360studio.zip`);
-  return { fileCount: entries.length, totalBytes: zipBlob.size, externalDependencies };
+  if (options.download !== false) downloadBlob(zipBlob, options.filename ?? `${slugify(portableProject.name)}.360studio.zip`);
+  return { fileCount: entries.length, totalBytes: zipBlob.size, externalDependencies, blob: zipBlob };
 }
 
 export async function importProjectArchive(file: File, onProgress?: (value: ArchiveProgress) => void): Promise<PortableArchiveResult> {
