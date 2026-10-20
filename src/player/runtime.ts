@@ -18,7 +18,9 @@ interface MarkerApi {
 
 const htmlEscape = (value: string): string => value.replace(/[&<>"']/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character] ?? character);
 const safeColor = (value: string | undefined): string => value && /^#[0-9a-f]{6}$/i.test(value) ? value : '#a3e635';
-function safeHttpUrl(value: string | undefined): string | undefined { try { const parsed = new URL(value ?? ''); return parsed.protocol === 'http:' || parsed.protocol === 'https:' ? parsed.href : undefined; } catch { return undefined; } }
+const safeThemeColor = (value: string | undefined, fallback: string): string => value && /^#[0-9a-f]{6}$/i.test(value) ? value : fallback;
+const safeFontFamily = (value: string | undefined): string => { const fonts: Record<string, string> = { system: 'system-ui, sans-serif', Inter: 'Inter, sans-serif', 'DM Sans': 'DM Sans, sans-serif', Arial: 'Arial, sans-serif', Georgia: 'Georgia, serif', Montserrat: 'Montserrat, sans-serif' }; return fonts[value ?? 'Inter'] ?? fonts.Inter; };
+function safeHttpUrl(value: string | undefined): string | undefined { try { if (!value) return undefined; const parsed = new URL(value); return parsed.protocol === 'http:' || parsed.protocol === 'https:' ? parsed.href : undefined; } catch { return undefined; } }
 
 function isRecord(value: unknown): value is Record<string, unknown> { return typeof value === 'object' && value !== null && !Array.isArray(value); }
 function validateProject(value: unknown): RuntimeProject {
@@ -66,6 +68,9 @@ class StandaloneTourPlayer {
     this.project = project;
     manifest.files.forEach((file) => this.pathByAssetId.set(file.assetId, file.path));
     this.root.style.setProperty('--tour-accent', safeColor(project.settings.accentColor));
+    this.root.style.setProperty('--tour-background', safeThemeColor(project.settings.backgroundColor, '#080b10'));
+    this.root.style.setProperty('--tour-foreground', safeThemeColor(project.settings.textColor, '#f5f7fa'));
+    this.root.style.setProperty('--tour-font-family', safeFontFamily(project.settings.fontFamily));
     this.root.innerHTML = `
       <div class="tour-app">
         <header class="tour-header">
@@ -88,6 +93,24 @@ class StandaloneTourPlayer {
     brand.textContent = this.project.settings.brandName || this.project.name;
     this.root.querySelector<HTMLElement>('[data-tour-title]')!.textContent = this.project.name;
     document.title = this.project.name;
+    const app = this.root.querySelector<HTMLElement>('.tour-app')!;
+    app.classList.toggle('tour-popup-compact', project.settings.popupStyle === 'compact');
+    const brandButton = this.root.querySelector<HTMLButtonElement>('.tour-brand')!;
+    brandButton.hidden = project.settings.showBrand === false;
+    brandButton.disabled = project.settings.showSceneMenu === false;
+    const brandMark = this.root.querySelector<HTMLElement>('.tour-brand-mark')!;
+    const logoUrl = safeHttpUrl(project.settings.brandLogoUrl);
+    if (logoUrl && project.settings.showBrand !== false) {
+      const logo = document.createElement('img');
+      logo.src = logoUrl;
+      logo.alt = project.settings.brandName || project.name || 'Tour logo';
+      brandMark.replaceChildren(logo);
+    }
+    this.root.querySelector<HTMLButtonElement>('.tour-controls [data-action="toggle-scenes"]')!.hidden = project.settings.showSceneMenu === false;
+    this.soundButton.hidden = project.settings.showSoundControl === false;
+    this.root.querySelector<HTMLButtonElement>('[data-action="fullscreen"]')!.hidden = project.settings.allowFullscreen === false || project.settings.showFullscreenControl === false;
+    this.root.querySelector<HTMLElement>('.tour-scene-heading')!.hidden = project.settings.showSceneTitle === false;
+    this.root.querySelector<HTMLElement>('.tour-footer')!.hidden = project.settings.showFooter === false;
     this.renderSceneMenu();
     this.bindControls();
   }
@@ -577,3 +600,5 @@ else void boot();
 /* 360-STUDIO-HOTSPOT-SPATIAL-TRANSFORMS-V0.8.0 */
 
 /* 360-STUDIO-SCALE-CONTROLS-V0.9.1 */
+
+/* 360-STUDIO-TOUR-THEME-CUSTOMIZER-V0.11.0 */

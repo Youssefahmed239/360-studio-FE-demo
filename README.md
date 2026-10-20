@@ -156,3 +156,11 @@ The build script bundles the player runtime into the static editor output. ZIP64
 - Spatial image/video itself remains a Photo Sphere Viewer `elementLayer` marker at the project's saved spherical yaw/pitch. Its `rotation` is updated independently, so rotating the camera does not turn the media into a camera-facing overlay.
 - Project schema stays at version 1; the existing optional `spatialMedia.rotationYawDeg`, `rotationPitchDeg`, and `rotationRollDeg` fields serialize through project ZIP and standalone tour export.
 - Rebuild and test a new standalone tour after changes.
+
+## Tour Theme Customizer (v0.11.0)
+
+- Edit the published tour brand name, optional HTTPS logo, accent/background/text colors, font family, and media popup style from the Theme panel.
+- Toggle the brand, scene navigation, current scene title, sound control, fullscreen control, and footer independently. Fullscreen remains disabled when the existing allowFullscreen setting is false.
+- Theme settings are optional additions to schema-v1 project settings, so existing projects continue using compatible defaults. They travel with project JSON/ZIP and production-tour exports.
+- The standalone player applies a small font allow-list and accepts only HTTP(S) logo URLs. Remote logos require their host to remain available to tour visitors.
+- This milestone customizes the viewer shell and popup sizing; advanced per-component layouts, fully custom navigation templates, and uploaded/local logo asset management remain future work.

@@ -38,6 +38,7 @@ export default function App() {
   const spatialMediaTargetRef = useRef<string | null>(null);
   const [notice, setNotice] = useState('');
   const [showPublish, setShowPublish] = useState(false);
+  const [showThemePanel, setShowThemePanel] = useState(false);
   const [placingHotspot, setPlacingHotspot] = useState(false);
   const [movingHotspotId, setMovingHotspotId] = useState<string | null>(null);
   const [rotatingHotspotId, setRotatingHotspotId] = useState<string | null>(null);
@@ -216,6 +217,11 @@ export default function App() {
     updateScene(activeScene.id, { audio });
   }
 
+  function updateThemeSettings(patch: Partial<typeof project.settings>) {
+    const current = useProjectStore.getState().project;
+    updateProject({ ...current, settings: { ...current.settings, ...patch } });
+  }
+
   function updateSceneName(name: string) { if (activeScene) updateScene(activeScene.id, { name }); }
   function changeTransition(kind: TourScene['transition']['kind']) { if (activeScene) updateScene(activeScene.id, { transition: { ...activeScene.transition, kind } }); }
 
@@ -314,7 +320,7 @@ export default function App() {
       <aside className="left-rail">
         <button className="rail-item active"><Layers3 size={19} /><span>Scenes</span></button>
         <button className="rail-item" onClick={() => setNotice('The media library will be the next major feature; panorama binaries are already stored locally for this project.') }><Image size={19} /><span>Media</span></button>
-        <button className="rail-item" onClick={() => setNotice('Theme controls are planned for a later phase.')}><Sparkles size={19} /><span>Theme</span></button>
+        <button className="rail-item" onClick={() => setShowThemePanel(true)}><Sparkles size={19} /><span>Theme</span></button>
         <button className="rail-item" onClick={() => setNotice('Project settings are planned for a later phase.')}><Settings2 size={19} /><span>Settings</span></button>
         <div className="rail-spacer" /><button className="rail-item" onClick={() => setNotice('Help and documentation will be added as the editor grows.')}><CircleHelp size={19} /><span>Help</span></button>
         <div className="avatar">YS</div>
@@ -383,8 +389,39 @@ export default function App() {
     </div>
     {notice && <div className="toast" role="status"><span className="toast-icon"><Check size={15} /></span>{notice}<button aria-label="Dismiss notification" onClick={() => setNotice('')}><X size={14} /></button></div>}
     {selectedHotspot && <div className="modal-backdrop" onClick={() => setSelectedHotspot(null)}><div className={`hotspot-modal ${selectedHotspot.kind === 'page' ? 'hotspot-page-modal' : ''}`} onClick={(e) => e.stopPropagation()}><button className="modal-close" onClick={() => setSelectedHotspot(null)} aria-label="Close hotspot"><X size={17} /></button><div className="eyebrow">{selectedHotspot.kind.toUpperCase()} HOTSPOT</div><h2>{selectedHotspot.title}</h2>{selectedHotspot.kind === 'image' && selectedMediaUrl && <img className="hotspot-media-image" src={selectedMediaUrl} alt={selectedHotspot.title} />}{selectedHotspot.kind === 'video' && selectedMediaUrl && <video className="hotspot-media-video" src={selectedMediaUrl} controls playsInline />}{selectedHotspot.kind === 'audio' && selectedMediaUrl && <audio className="hotspot-media-audio" src={selectedMediaUrl} controls />}{selectedHotspot.kind === 'page' && selectedPageUrl && <iframe className="hotspot-media-page" src={selectedPageUrl} title={selectedHotspot.title} loading="lazy" referrerPolicy="strict-origin-when-cross-origin" allow="fullscreen; autoplay" />}{selectedHotspot.kind === 'page' && !selectedPageUrl && <p className="hotspot-modal-copy">Add a valid HTTP(S) page URL. Some websites block embedded viewing; use the new-tab option if that happens.</p>}{selectedHotspot.kind === 'info' && <p className="hotspot-modal-copy">This information hotspot is ready to be expanded with rich text and branded content in a later phase.</p>}{['image', 'video', 'audio'].includes(selectedHotspot.kind) && !selectedMediaUrl && <p className="hotspot-modal-copy">Add a direct media URL in the Inspector to preview this hotspot. Uploaded asset linking will follow in the Media Library phase.</p>}{selectedExternalUrl && <a className="hotspot-external-link" href={selectedExternalUrl} target="_blank" rel="noopener noreferrer"><ExternalLink size={14} /> {selectedHotspot.kind === 'page' ? 'Open page in new tab' : 'Open source in new tab'}</a>}</div></div>}
+    {showThemePanel && <div className="modal-backdrop theme-backdrop" onClick={() => setShowThemePanel(false)}>
+      <section className="theme-modal" role="dialog" aria-modal="true" aria-labelledby="theme-panel-title" onClick={(event) => event.stopPropagation()}>
+        <button className="modal-close" type="button" onClick={() => setShowThemePanel(false)} aria-label="Close theme settings"><X size={17} /></button>
+        <div className="eyebrow">PUBLISHED TOUR APPEARANCE</div>
+        <h2 id="theme-panel-title">Theme & branding</h2>
+        <p className="theme-intro">These settings are stored in the project and applied to the standalone player when you build the tour.</p>
+        <div className="theme-preview" style={{ backgroundColor: project.settings.backgroundColor ?? '#080b10', color: project.settings.textColor ?? '#f5f7fa', borderColor: project.settings.accentColor ?? '#a3e635', fontFamily: project.settings.fontFamily === 'system' ? 'system-ui, sans-serif' : (project.settings.fontFamily ?? 'Inter') }}>
+          <div className="theme-preview-brand"><span className="theme-preview-mark" style={{ backgroundColor: project.settings.accentColor ?? '#a3e635' }}>{project.settings.brandName?.trim().slice(0, 1).toUpperCase() || '360'}</span><strong>{project.settings.brandName || project.name || 'Your Event'}</strong></div>
+          <span className="theme-preview-pill" style={{ backgroundColor: project.settings.accentColor ?? '#a3e635' }}>Explore experience</span>
+          <small>LIVE THEME PREVIEW</small>
+        </div>
+        <div className="theme-form-grid">
+          <div className="theme-field"><label className="field-label" htmlFor="theme-brand-name">Brand name</label><input id="theme-brand-name" className="text-field" value={project.settings.brandName ?? ''} onChange={(event) => updateThemeSettings({ brandName: event.target.value })} placeholder="Your event or company" /></div>
+          <div className="theme-field"><label className="field-label" htmlFor="theme-logo-url">Logo URL (optional)</label><input id="theme-logo-url" className="text-field" type="url" value={project.settings.brandLogoUrl ?? ''} onChange={(event) => updateThemeSettings({ brandLogoUrl: event.target.value || undefined })} placeholder="https://your-host/logo.png" /></div>
+          <div className="theme-field"><label className="field-label" htmlFor="theme-accent">Accent color</label><div className="theme-color-control"><input id="theme-accent" aria-label="Accent color" type="color" value={/^#[0-9a-f]{6}$/i.test(project.settings.accentColor ?? '') ? project.settings.accentColor : '#a3e635'} onChange={(event) => updateThemeSettings({ accentColor: event.target.value })} /><code>{project.settings.accentColor ?? '#a3e635'}</code></div></div>
+          <div className="theme-field"><label className="field-label" htmlFor="theme-background">Background color</label><div className="theme-color-control"><input id="theme-background" aria-label="Background color" type="color" value={/^#[0-9a-f]{6}$/i.test(project.settings.backgroundColor ?? '') ? project.settings.backgroundColor! : '#080b10'} onChange={(event) => updateThemeSettings({ backgroundColor: event.target.value })} /><code>{project.settings.backgroundColor ?? '#080b10'}</code></div></div>
+          <div className="theme-field"><label className="field-label" htmlFor="theme-text-color">Text color</label><div className="theme-color-control"><input id="theme-text-color" aria-label="Text color" type="color" value={/^#[0-9a-f]{6}$/i.test(project.settings.textColor ?? '') ? project.settings.textColor! : '#f5f7fa'} onChange={(event) => updateThemeSettings({ textColor: event.target.value })} /><code>{project.settings.textColor ?? '#f5f7fa'}</code></div></div>
+          <div className="theme-field"><label className="field-label" htmlFor="theme-font">Font family</label><select id="theme-font" className="text-field" value={project.settings.fontFamily ?? 'Inter'} onChange={(event) => updateThemeSettings({ fontFamily: event.target.value as typeof project.settings.fontFamily })}><option value="system">System default</option><option value="Inter">Inter</option><option value="DM Sans">DM Sans</option><option value="Arial">Arial</option><option value="Georgia">Georgia</option><option value="Montserrat">Montserrat</option></select></div>
+          <div className="theme-field"><label className="field-label" htmlFor="theme-popup">Media popup style</label><select id="theme-popup" className="text-field" value={project.settings.popupStyle ?? 'modal'} onChange={(event) => updateThemeSettings({ popupStyle: event.target.value as 'modal' | 'compact' })}><option value="modal">Large modal</option><option value="compact">Compact panel</option></select></div>
+        </div>
+        <div className="theme-toggle-grid">
+          <label><input type="checkbox" checked={project.settings.showBrand !== false} onChange={(event) => updateThemeSettings({ showBrand: event.target.checked })} /> Show brand / logo</label>
+          <label><input type="checkbox" checked={project.settings.showSceneMenu !== false} onChange={(event) => updateThemeSettings({ showSceneMenu: event.target.checked })} /> Show scene navigation</label>
+          <label><input type="checkbox" checked={project.settings.showSceneTitle !== false} onChange={(event) => updateThemeSettings({ showSceneTitle: event.target.checked })} /> Show current scene title</label>
+          <label><input type="checkbox" checked={project.settings.showSoundControl !== false} onChange={(event) => updateThemeSettings({ showSoundControl: event.target.checked })} /> Show sound control</label>
+          <label><input type="checkbox" checked={project.settings.showFullscreenControl !== false && project.settings.allowFullscreen !== false} onChange={(event) => updateThemeSettings({ showFullscreenControl: event.target.checked, allowFullscreen: event.target.checked })} /> Show fullscreen control</label>
+          <label><input type="checkbox" checked={project.settings.showFooter !== false} onChange={(event) => updateThemeSettings({ showFooter: event.target.checked })} /> Show footer</label>
+        </div>
+        <div className="theme-modal-actions"><button type="button" className="button button-quiet" onClick={() => updateThemeSettings({ accentColor: '#a3e635', backgroundColor: '#080b10', textColor: '#f5f7fa', fontFamily: 'Inter', brandLogoUrl: undefined, popupStyle: 'modal', showBrand: true, showSceneMenu: true, showSceneTitle: true, showSoundControl: true, showFullscreenControl: true, showFooter: true, allowFullscreen: true })}>Reset appearance</button><button type="button" className="button button-primary" onClick={() => setShowThemePanel(false)}>Done</button></div>
+      </section>
+    </div>}
     {showPublish && <div className="modal-backdrop" onClick={() => setShowPublish(false)}><div className="publish-modal" onClick={(e) => e.stopPropagation()}><div className="modal-icon"><Globe2 size={22} /></div><button className="modal-close" onClick={() => setShowPublish(false)} aria-label="Close"><X size={17} /></button><div className="eyebrow">PRODUCTION WORKFLOW</div><h2>Build for the web</h2><p>Build a standalone tour bundle with its own viewer runtime, project configuration, panoramas, hotspots, and included media. Extract the ZIP into an Nginx directory and share that URL; visitors will not see the Studio editor.</p><div className="build-checklist"><span><Check size={15} /> Save / resume draft with local media</span><span><Check size={15} /> Export / import project configuration</span><span><Check size={15} /> Interactive 360° viewer and scene navigation</span><span><Check size={15} /> Multi-resolution tile manifest + viewer support</span><span><Check size={15} /> Standalone player runtime + Nginx deployment ZIP</span></div><button className="button button-primary full-width" onClick={() => void handleBuildProductionTour()} disabled={buildingProduction}>{buildingProduction ? productionStatus : 'Build standalone tour (.zip)'}</button></div></div>}
-    <footer className="bottom-status"><span><span className={`status-dot ${saveState}`} /> Workspace ready</span><span>360 Studio Demo <span className="footer-divider">/</span> v0.10.0</span><span>Project schema v1</span></footer>
+    <footer className="bottom-status"><span><span className={`status-dot ${saveState}`} /> Workspace ready</span><span>360 Studio Demo <span className="footer-divider">/</span> v0.11.0</span><span>Project schema v1</span></footer>
   </div>;
 }
 
@@ -397,3 +434,5 @@ export default function App() {
 /* 360-STUDIO-SCALE-CONTROLS-V0.9.1 */
 
 /* 360-STUDIO-UNITY-ROTATE-GIZMO-V0.10.0 */
+
+/* 360-STUDIO-TOUR-THEME-CUSTOMIZER-V0.11.0 */

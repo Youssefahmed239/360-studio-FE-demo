@@ -108,7 +108,23 @@ export interface TourProject {
   id: string;
   name: string;
   updatedAt: string;
-  settings: { brandName: string; accentColor: string; startSceneId: string; allowFullscreen: boolean };
+  settings: {
+    brandName: string;
+    accentColor: string;
+    startSceneId: string;
+    allowFullscreen: boolean;
+    backgroundColor?: string;
+    textColor?: string;
+    fontFamily?: 'system' | 'Inter' | 'DM Sans' | 'Arial' | 'Georgia' | 'Montserrat';
+    brandLogoUrl?: string;
+    popupStyle?: 'modal' | 'compact';
+    showBrand?: boolean;
+    showSceneMenu?: boolean;
+    showSceneTitle?: boolean;
+    showSoundControl?: boolean;
+    showFullscreenControl?: boolean;
+    showFooter?: boolean;
+  };
   scenes: TourScene[];
   assets: TourAsset[];
 }
@@ -120,3 +136,5 @@ export interface TourProject {
 /* 360-STUDIO-HOTSPOT-SPATIAL-TRANSFORMS-V0.8.0 */
 
 /* 360-STUDIO-SCALE-CONTROLS-V0.9.1 */
+
+/* 360-STUDIO-TOUR-THEME-CUSTOMIZER-V0.11.0 */
