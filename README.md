@@ -2,7 +2,7 @@
 
 An independent frontend starter for a customizable 360° tour authoring studio. This repository is intentionally separate from `360-studio-FE`.
 
-## Current foundation (v0.5.0)
+## Current foundation (v0.13.0)
 
 - Responsive editor shell with scene list, canvas, timeline, and inspector.
 - Interactive Photo Sphere Viewer canvas for uploaded equirectangular panoramas.
@@ -64,10 +64,22 @@ The viewer first loads `preview.jpg`, then asks for tiles that match the current
 ## Save and export
 
 - **Save/autosave:** project configuration and the last-open scene are stored in `localStorage`; uploaded image binaries are stored in IndexedDB. This is browser-local storage, not cloud backup.
-- **Export project:** downloads `.360studio.json` with the editable project configuration. It does not yet package local upload binaries or the files referenced by tile manifests.
-- **Import project:** imports a compatible schema-v1 JSON file.
+- **Export project ZIP:** downloads an editable project archive with project configuration, upload binaries, and reachable tiled panorama files.
+- **Import project:** restores a portable project ZIP or compatible schema-v1 JSON configuration.
+- **Build for web:** exports a separate standalone tour ZIP. The Studio editor is not required on the production server.
+- Uploaded media and draft configuration are stored in this browser's IndexedDB/localStorage. This is not cloud backup or multi-user collaboration.
 
-A portable ZIP archive that bundles originals and generated files is still a separate milestone. Keep a copy of the tiled output folder alongside your project JSON until that archive flow lands.
+
+## Tour Layout & Welcome Screen Builder (v0.13.0)
+
+- Open **Layout** in the editor to configure a visitor-facing overlay toolbar and a scene-specific welcome screen.
+- The toolbar can be disabled, grouped into one row, or switched to free placement. In free mode, drag individual controls around the live schematic preview; in grouped mode, drag a button to move the group.
+- Add button controls, image controls (URL or browser-uploaded assets), and transparent **Hidden hotspot** hit areas. Each element can trigger previous/next scene, a specific scene, welcome open/close, camera reset, external URL, or an embedded page/document.
+- Assign the welcome panel to one or more scenes, configure title and body, size, panel opacity, backdrop opacity, close button, and once-per-browser behaviour.
+- Layout configuration lives in the project JSON. Uploaded layout images are included through the same asset archive/manifest path used by other uploaded project assets, so standalone player URLs resolve from the extracted bundle.
+- Old schema-v1 projects without `layout` remain valid. The new toolbar and welcome screen are opt-in and do not alter older tour appearance until enabled.
+- The in-editor preview is schematic, not a pixel-perfect preview of a real panoramic scene. Check the exported player at desktop and mobile viewport sizes before release.
+- Embedded pages depend on the target website's iframe/CSP policy. Use the action type **Open external URL** when the destination disallows embedding.
 
 ## Check/build
 

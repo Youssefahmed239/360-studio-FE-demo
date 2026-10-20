@@ -1,6 +1,58 @@
 export type HotspotKind = 'navigation' | 'image' | 'video' | 'audio' | 'info' | 'link' | 'page';
 export type TransitionKind = 'fade' | 'fade-through-black' | 'zoom' | 'none';
 
+export type TourUiElementKind = 'button' | 'image' | 'hotspot';
+export type TourUiAction = 'none' | 'previous-scene' | 'next-scene' | 'welcome' | 'close-welcome' | 'camera-reset' | 'scene' | 'scene-menu' | 'sound-toggle' | 'fullscreen' | 'map' | 'url' | 'page';
+
+export interface TourUiElement {
+  id: string;
+  type: TourUiElementKind;
+  label: string;
+  action: TourUiAction;
+  url?: string;
+  targetSceneId?: string;
+  imageAssetId?: string;
+  imageUrl?: string;
+  /** Percent offset within the preview/stage (free toolbar) or welcome panel. */
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  /** Hidden items remain clickable hit areas in the published tour. */
+  visible?: boolean;
+}
+
+export interface TourToolbarLayout {
+  enabled: boolean;
+  mode: 'grouped' | 'free';
+  edge: 'top' | 'bottom';
+  x: number;
+  y: number;
+  gap: number;
+  elements: TourUiElement[];
+}
+
+export interface TourWelcomeLayout {
+  enabled: boolean;
+  /** Scene IDs that should show the welcome screen. */
+  sceneIds: string[];
+  showOnce: boolean;
+  title: string;
+  body: string;
+  widthPercent: number;
+  heightPx: number;
+  panelOpacity: number;
+  backdropOpacity: number;
+  showCloseButton: boolean;
+  elements: TourUiElement[];
+}
+
+export interface TourLayoutSettings {
+  toolbar: TourToolbarLayout;
+  welcome: TourWelcomeLayout;
+}
+
+
 export type HotspotAppearanceMode = 'default' | 'image' | 'invisible';
 export type HotspotAnimation = 'none' | 'pulse' | 'bounce' | 'rotate';
 export type HotspotShape = 'pill' | 'circle' | 'square';
@@ -125,6 +177,8 @@ export interface TourProject {
     showFullscreenControl?: boolean;
     showFooter?: boolean;
   };
+  /** Optional visitor-facing overlay layout; absent on older projects. */
+  layout?: TourLayoutSettings;
   scenes: TourScene[];
   assets: TourAsset[];
 }

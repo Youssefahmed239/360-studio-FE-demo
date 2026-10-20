@@ -65,3 +65,11 @@ Do not deploy while any command exits non-zero. Review each warning from the bun
 ## Release decision
 
 A build passing automated checks is **not** an automatic production approval. Mark the release ready only after the manual browser/device checks and the real Nginx deployment pass. Record browser/OS, build commit, bundle name, test date, blockers and rollback path in the release notes.
+
+## Tour layout and welcome screen
+- [ ] Grouped toolbar positions as a unit; free-placement controls drag independently.
+- [ ] Buttons, uploaded images, URL images and hidden hit areas perform the configured action.
+- [ ] Welcome screen opens only on selected scene IDs and obeys Show once / close settings.
+- [ ] Panel opacity and backdrop opacity are independently adjustable and the panorama remains visible.
+- [ ] Layout is preserved in project ZIP and standalone production ZIP, including uploaded image assets.
+- [ ] Page/document actions are tested for iframe-compatible and iframe-blocked URLs.

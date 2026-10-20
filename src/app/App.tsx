@@ -1,12 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
-import { Aperture, ArrowDownToLine, AudioLines, Check, ChevronDown, CircleHelp, Cloud, ExternalLink, FolderOpen, Globe2, Image, Layers3, MonitorPlay, MoreHorizontal, Plus, Save, Settings2, Sparkles, Trash2, Video, X } from 'lucide-react';
+import type { CSSProperties, PointerEvent as ReactPointerEvent } from 'react';
+import { Aperture, ArrowDownToLine, AudioLines, Check, ChevronDown, CircleHelp, Cloud, ExternalLink, FolderOpen, Globe2, Image, Layers3, LayoutDashboard, MonitorPlay, MoreHorizontal, Plus, Save, Settings2, Sparkles, Trash2, Video, X } from 'lucide-react';
 import { useProjectStore } from '../features/projects/projectStore';
 import { persistUploadedAsset, restoreUploadedAssetUrls } from '../features/assets/assetStorage';
 import PanoramaCanvas from '../features/panorama/PanoramaCanvas';
 import { loadTiledPanoramaManifest } from '../features/panorama/panoramaManifest';
 import { exportProjectArchive, importProjectFile } from '../lib/portableProjectArchive';
 import { exportProductionTourBundle } from '../lib/productionTourBundle';
-import type { HotspotKind, TourHotspot, TourScene } from '../types/project';
+import type { HotspotKind, TourHotspot, TourLayoutSettings, TourScene, TourUiAction, TourUiElement, TourUiElementKind } from '../types/project';
 
 const statusText = { saved: 'All changes saved', unsaved: 'Unsaved changes', saving: 'Saving…', error: 'Save failed' } as const;
 const hotspotKinds: HotspotKind[] = ['navigation', 'link', 'page', 'image', 'video', 'audio', 'info'];
@@ -16,6 +17,43 @@ function safeHttpUrl(value: string | undefined): string | undefined {
     const parsed = new URL(value ?? '');
     return parsed.protocol === 'http:' || parsed.protocol === 'https:' ? parsed.href : undefined;
   } catch { return undefined; }
+}
+
+function createDefaultTourLayout(startSceneId: string): TourLayoutSettings {
+  return {
+    toolbar: {
+      enabled: false,
+      mode: 'grouped',
+      edge: 'top',
+      x: 50,
+      y: 8,
+      gap: 10,
+      elements: [
+        { id: 'layout-default-welcome', type: 'button', label: 'Welcome', action: 'welcome', x: 4, y: 8, width: 124, height: 40, visible: true },
+        { id: 'layout-default-previous', type: 'button', label: 'Previous Section', action: 'previous-scene', x: 4, y: 8, width: 160, height: 40, visible: true },
+        { id: 'layout-default-next', type: 'button', label: 'Next Section', action: 'next-scene', x: 4, y: 8, width: 140, height: 40, visible: true },
+      ],
+    },
+    welcome: {
+      enabled: false,
+      sceneIds: startSceneId ? [startSceneId] : [],
+      showOnce: true,
+      title: 'Welcome to our event',
+      body: 'Explore the panorama, discover the content, and enjoy the experience.',
+      widthPercent: 72,
+      heightPx: 440,
+      panelOpacity: 0.94,
+      backdropOpacity: 0.24,
+      showCloseButton: true,
+      elements: [
+        { id: 'layout-default-join', type: 'button', label: 'Join Event', action: 'url', url: '', x: 50, y: 78, width: 150, height: 44, visible: true },
+      ],
+    },
+  };
+}
+
+function clampNumber(value: number, min: number, max: number): number {
+  return Number.isFinite(value) ? Math.min(max, Math.max(min, value)) : min;
 }
 
 export default function App() {
@@ -36,9 +74,16 @@ export default function App() {
   const hotspotImageTargetRef = useRef<string | null>(null);
   const spatialMediaInputRef = useRef<HTMLInputElement>(null);
   const spatialMediaTargetRef = useRef<string | null>(null);
+  const layoutImageInputRef = useRef<HTMLInputElement>(null);
+  const layoutImageTargetRef = useRef<{ area: 'toolbar' | 'welcome'; elementId: string } | null>(null);
+  const layoutPreviewRef = useRef<HTMLDivElement>(null);
+  const layoutDragRef = useRef<{ area: 'toolbar' | 'welcome'; elementId: string; startX: number; startY: number; originX: number; originY: number; grouped: boolean } | null>(null);
   const [notice, setNotice] = useState('');
   const [showPublish, setShowPublish] = useState(false);
   const [showThemePanel, setShowThemePanel] = useState(false);
+  const [showLayoutPanel, setShowLayoutPanel] = useState(false);
+  const [layoutTab, setLayoutTab] = useState<'toolbar' | 'welcome'>('toolbar');
+  const [selectedLayoutElementId, setSelectedLayoutElementId] = useState<string | null>(null);
   const [placingHotspot, setPlacingHotspot] = useState(false);
   const [movingHotspotId, setMovingHotspotId] = useState<string | null>(null);
   const [rotatingHotspotId, setRotatingHotspotId] = useState<string | null>(null);
@@ -51,6 +96,7 @@ export default function App() {
   const [buildingProduction, setBuildingProduction] = useState(false);
   const [productionStatus, setProductionStatus] = useState('Building tour…');
   const activeScene = project.scenes.find((scene) => scene.id === activeSceneId) ?? project.scenes[0];
+  const tourLayout = project.layout ?? createDefaultTourLayout(project.settings.startSceneId);
 
   useEffect(() => { void load(); }, [load]);
   useEffect(() => {
@@ -125,6 +171,105 @@ export default function App() {
     updateHotspot(hotspotId, { assetId, url: undefined, spatialMedia: { ...(currentHotspot.spatialMedia ?? {}), enabled: true } });
     setNotice(persisted ? 'Spatial media saved to this project.' : 'Media added for this session, but browser storage failed, so it may not survive refresh.');
     if (spatialMediaInputRef.current) spatialMediaInputRef.current.value = '';
+  }
+
+  function saveTourLayout(nextLayout: TourLayoutSettings) {
+    const current = useProjectStore.getState().project;
+    updateProject({ ...current, layout: nextLayout });
+  }
+
+  function updateLayoutElement(area: 'toolbar' | 'welcome', elementId: string, patch: Partial<TourUiElement>) {
+    const updatedElements = tourLayout[area].elements.map((element) => element.id === elementId ? { ...element, ...patch } : element);
+    if (area === 'toolbar') {
+      saveTourLayout({ ...tourLayout, toolbar: { ...tourLayout.toolbar, elements: updatedElements } });
+    } else {
+      saveTourLayout({ ...tourLayout, welcome: { ...tourLayout.welcome, elements: updatedElements } });
+    }
+  }
+
+  function updateLayoutArea(area: 'toolbar' | 'welcome', patch: Partial<TourLayoutSettings['toolbar']> | Partial<TourLayoutSettings['welcome']>) {
+    const nextLayout = { ...tourLayout, [area]: { ...tourLayout[area], ...patch } } as TourLayoutSettings;
+    saveTourLayout(nextLayout);
+  }
+
+  function addLayoutElement(area: 'toolbar' | 'welcome', type: TourUiElementKind) {
+    const currentElements = tourLayout[area].elements;
+    const id = crypto.randomUUID();
+    const element: TourUiElement = {
+      id,
+      type,
+      label: type === 'image' ? 'Image button' : type === 'hotspot' ? 'Hidden click area' : 'New button',
+      action: 'none',
+      x: 12 + (currentElements.length % 4) * 18,
+      y: 18 + (currentElements.length % 4) * 15,
+      width: type === 'image' ? 140 : type === 'hotspot' ? 120 : 136,
+      height: type === 'image' ? 80 : type === 'hotspot' ? 64 : 42,
+      visible: type !== 'hotspot',
+    };
+    updateLayoutArea(area, { elements: [...currentElements, element] } as Partial<TourLayoutSettings['toolbar']> & Partial<TourLayoutSettings['welcome']>);
+    setSelectedLayoutElementId(id);
+  }
+
+  function removeLayoutElement(area: 'toolbar' | 'welcome', elementId: string) {
+    updateLayoutArea(area, { elements: tourLayout[area].elements.filter((element) => element.id !== elementId) } as Partial<TourLayoutSettings['toolbar']> & Partial<TourLayoutSettings['welcome']>);
+    setSelectedLayoutElementId((current) => current === elementId ? null : current);
+  }
+
+  function beginLayoutElementDrag(area: 'toolbar' | 'welcome', elementId: string, event: ReactPointerEvent<HTMLElement>) {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    const areaConfig = tourLayout[area];
+    const grouped = area === 'toolbar' && tourLayout.toolbar.mode === 'grouped';
+    layoutDragRef.current = {
+      area,
+      elementId,
+      startX: event.clientX,
+      startY: event.clientY,
+      originX: grouped ? tourLayout.toolbar.x : (areaConfig.elements.find((element) => element.id === elementId)?.x ?? 0),
+      originY: grouped ? tourLayout.toolbar.y : (areaConfig.elements.find((element) => element.id === elementId)?.y ?? 0),
+      grouped,
+    };
+    setSelectedLayoutElementId(elementId);
+  }
+
+  function moveLayoutElementDrag(event: ReactPointerEvent<HTMLElement>) {
+    const drag = layoutDragRef.current;
+    if (!drag) return;
+    const preview = layoutPreviewRef.current;
+    if (!preview) return;
+    const bounds = drag.area === 'welcome'
+      ? (preview.querySelector<HTMLElement>('.tour-layout-preview-panel')?.getBoundingClientRect() ?? preview.getBoundingClientRect())
+      : preview.getBoundingClientRect();
+    if (bounds.width <= 0 || bounds.height <= 0) return;
+    const x = clampNumber(drag.originX + ((event.clientX - drag.startX) / bounds.width) * 100, 0, 100);
+    const y = clampNumber(drag.originY + ((event.clientY - drag.startY) / bounds.height) * 100, 0, 100);
+    if (drag.grouped) updateLayoutArea('toolbar', { x, y });
+    else updateLayoutElement(drag.area, drag.elementId, { x, y });
+  }
+
+  function endLayoutElementDrag() {
+    layoutDragRef.current = null;
+  }
+
+  async function uploadLayoutImage(file?: File) {
+    const target = layoutImageTargetRef.current;
+    if (!file || !target) return;
+    if (!file.type.startsWith('image/')) { setNotice('Choose an image file for the layout element.'); return; }
+    if (file.size > 40 * 1024 * 1024) { setNotice('Layout images must be 40 MB or smaller.'); return; }
+    const assetId = crypto.randomUUID();
+    const url = URL.createObjectURL(file);
+    let persisted = true;
+    try { await persistUploadedAsset(assetId, file); } catch { persisted = false; }
+    const current = useProjectStore.getState().project;
+    updateProject({ ...current, assets: [...current.assets, { id: assetId, name: file.name, kind: 'image', mimeType: file.type || 'application/octet-stream', source: 'uploaded', originalFileName: file.name, url }] });
+    updateLayoutElement(target.area, target.elementId, { imageAssetId: assetId, imageUrl: undefined, type: 'image' });
+    setNotice(persisted ? 'Layout image added and saved to this browser.' : 'Layout image added for this session, but browser storage failed.');
+    if (layoutImageInputRef.current) layoutImageInputRef.current.value = '';
+  }
+
+  function layoutElementImageUrl(element: TourUiElement): string | undefined {
+    return (element.imageAssetId ? project.assets.find((asset) => asset.id === element.imageAssetId)?.url : undefined) ?? safeHttpUrl(element.imageUrl);
   }
 
   function handleImport(file?: File) {
@@ -302,6 +447,24 @@ export default function App() {
   const selectedMediaUrl = selectedHotspot?.url ?? selectedAsset?.url;
   const selectedExternalUrl = safeHttpUrl(selectedMediaUrl);
   const selectedPageUrl = selectedHotspot?.kind === 'page' ? selectedExternalUrl : undefined;
+  const layoutElements = tourLayout[layoutTab].elements;
+  const selectedLayoutElement = layoutElements.find((element) => element.id === selectedLayoutElementId) ?? layoutElements[0];
+
+  function renderLayoutElementPreview(element: TourUiElement, area: 'toolbar' | 'welcome', grouped = false) {
+    const imageUrl = layoutElementImageUrl(element);
+    const invisible = element.type === 'hotspot' || element.visible === false;
+    const style: CSSProperties = {
+      width: `${clampNumber(element.width, 24, 1000)}px`,
+      height: `${clampNumber(element.height, 24, 800)}px`,
+      ...(grouped ? {} : { position: 'absolute', left: `${clampNumber(element.x, 0, 100)}%`, top: `${clampNumber(element.y, 0, 100)}%`, transform: 'translate(-50%, -50%)' }),
+      ...(invisible ? { opacity: 0.72, background: 'transparent', border: '1px dashed #f87171', color: '#fecaca' } : {}),
+    };
+    const beginDrag = (event: ReactPointerEvent<HTMLElement>) => beginLayoutElementDrag(area, element.id, event);
+    const endDrag = () => endLayoutElementDrag();
+    return <button key={element.id} type="button" className={`tour-layout-preview-element ${element.type} ${selectedLayoutElementId === element.id ? 'selected' : ''} ${invisible ? 'invisible-preview' : ''}`} style={style} title="Drag to reposition" onClick={() => setSelectedLayoutElementId(element.id)} onPointerDown={beginDrag} onPointerUp={endDrag} onPointerCancel={endDrag}>
+      {element.type === 'image' && imageUrl ? <img src={imageUrl} alt={element.label} draggable={false} /> : element.type === 'hotspot' ? <span>Hidden hotspot</span> : element.type === 'image' ? <span>Choose image</span> : <span>{element.label || 'Button'}</span>}
+    </button>;
+  }
 
   return <div className="studio-shell">
     <header className="topbar">
@@ -321,6 +484,7 @@ export default function App() {
         <button className="rail-item active"><Layers3 size={19} /><span>Scenes</span></button>
         <button className="rail-item" onClick={() => setNotice('The media library will be the next major feature; panorama binaries are already stored locally for this project.') }><Image size={19} /><span>Media</span></button>
         <button className="rail-item" onClick={() => setShowThemePanel(true)}><Sparkles size={19} /><span>Theme</span></button>
+        <button className="rail-item" onClick={() => { setShowLayoutPanel(true); setSelectedLayoutElementId((tourLayout[layoutTab].elements[0]?.id) ?? null); }}><LayoutDashboard size={19} /><span>Layout</span></button>
         <button className="rail-item" onClick={() => setNotice('Project settings are planned for a later phase.')}><Settings2 size={19} /><span>Settings</span></button>
         <div className="rail-spacer" /><button className="rail-item" onClick={() => setNotice('Help and documentation will be added as the editor grows.')}><CircleHelp size={19} /><span>Help</span></button>
         <div className="avatar">YS</div>
@@ -341,7 +505,7 @@ export default function App() {
         <div className="canvas-area"><div className={`canvas-frame ${placingHotspot ? 'hotspot-placement' : ''} ${movingHotspotId && !previewMode ? 'hotspot-moving' : ''}`}>
           {activeScene ? <PanoramaCanvas scene={activeScene} assets={project.assets} placementMode={placingHotspot && !previewMode} previewMode={previewMode} moveHotspotId={previewMode ? null : movingHotspotId} onMoveHotspot={moveHotspot} rotateGizmoHotspotId={previewMode ? null : rotatingHotspotId} onRotateHotspot={rotateHotspot} onPlaceHotspot={placeHotspot} onHotspotAction={activateHotspot} /> : null}
           {!activeScene?.panoramaUrl && !activeScene?.tiledPanorama && <div className="empty-panorama"><div className="orbit orbit-one"/><div className="orbit orbit-two"/><div className="orbit-center"><Aperture size={38} strokeWidth={1.2} /></div><div className="empty-copy"><span className="eyebrow">SCENE CANVAS</span><h2>Your world starts here.</h2><p>Add an equirectangular panorama to explore the scene in full 360°.</p><button className="button button-primary" onClick={() => panoramaRef.current?.click()}><Plus size={16} /> Add panorama</button><div className="file-hint">JPG, PNG, WEBP · Original file retained in browser storage</div></div></div>}
-          <input ref={panoramaRef} className="visually-hidden" type="file" accept="image/jpeg,image/png,image/webp" onChange={(e) => void addPanorama(e.target.files?.[0])} /><input ref={hotspotImageInputRef} className="visually-hidden" type="file" accept="image/*" onChange={(e) => void uploadHotspotImage(e.target.files?.[0])} /><input ref={spatialMediaInputRef} className="visually-hidden" type="file" accept="image/*,video/mp4,video/webm,video/ogg" onChange={(e) => void uploadSpatialMedia(e.target.files?.[0])} />
+          <input ref={panoramaRef} className="visually-hidden" type="file" accept="image/jpeg,image/png,image/webp" onChange={(e) => void addPanorama(e.target.files?.[0])} /><input ref={hotspotImageInputRef} className="visually-hidden" type="file" accept="image/*" onChange={(e) => void uploadHotspotImage(e.target.files?.[0])} /><input ref={spatialMediaInputRef} className="visually-hidden" type="file" accept="image/*,video/mp4,video/webm,video/ogg" onChange={(e) => void uploadSpatialMedia(e.target.files?.[0])} /><input ref={layoutImageInputRef} className="visually-hidden" type="file" accept="image/*" onChange={(e) => void uploadLayoutImage(e.target.files?.[0])} />
           <div className="canvas-corner top-left"><span className="live-dot" /> {previewMode ? 'TOUR PREVIEW' : placingHotspot ? 'CLICK TO PLACE HOTSPOT' : '360° EDITOR CANVAS'}</div><div className="canvas-corner top-right"><span>360°</span><span className="corner-divider" /> <span>{activeScene?.tiledPanorama ? 'TILE STREAMING' : 'SPHERICAL VIEW'}</span></div>
           <div className="canvas-bottom-tools"><button className={placingHotspot ? 'tool-active' : ''} disabled={(!activeScene?.panoramaUrl && !activeScene?.tiledPanorama) || previewMode} onClick={() => { if (!activeScene?.panoramaUrl && !activeScene?.tiledPanorama) { setNotice('Upload a panorama or connect a tile manifest first.'); return; } setPlacingHotspot((value) => !value); }}><Plus size={14} /> {placingHotspot ? 'Cancel placement' : 'Add hotspot'}</button><span className="tool-divider"/><button onClick={() => setNotice('Drag to look around. Use the mouse wheel or trackpad to zoom. The saved camera starting position is configured in the Inspector phase.') }><Aperture size={14} /> Camera</button><span className="tool-divider"/><button onClick={() => { setNotice('Choose a hotspot type in the Inspector after placing it. Image, video and audio viewers use direct URLs or assets linked in the project.'); setPlacingHotspot(false); }}><Video size={14} /> Place media</button></div>
         </div><div className="canvas-caption"><span><span className="keycap">Drag</span> look around <span className="caption-divider" /> Scroll to zoom <span className="caption-divider" /> {placingHotspot ? 'Click anywhere to place a hotspot' : 'Click a hotspot to interact'}</span><span>{previewMode ? 'TOUR PREVIEW' : 'EDITOR PREVIEW'} <span className="preview-dot" /></span></div></div>
@@ -389,6 +553,90 @@ export default function App() {
     </div>
     {notice && <div className="toast" role="status"><span className="toast-icon"><Check size={15} /></span>{notice}<button aria-label="Dismiss notification" onClick={() => setNotice('')}><X size={14} /></button></div>}
     {selectedHotspot && <div className="modal-backdrop" onClick={() => setSelectedHotspot(null)}><div className={`hotspot-modal ${selectedHotspot.kind === 'page' ? 'hotspot-page-modal' : ''}`} onClick={(e) => e.stopPropagation()}><button className="modal-close" onClick={() => setSelectedHotspot(null)} aria-label="Close hotspot"><X size={17} /></button><div className="eyebrow">{selectedHotspot.kind.toUpperCase()} HOTSPOT</div><h2>{selectedHotspot.title}</h2>{selectedHotspot.kind === 'image' && selectedMediaUrl && <img className="hotspot-media-image" src={selectedMediaUrl} alt={selectedHotspot.title} />}{selectedHotspot.kind === 'video' && selectedMediaUrl && <video className="hotspot-media-video" src={selectedMediaUrl} controls playsInline />}{selectedHotspot.kind === 'audio' && selectedMediaUrl && <audio className="hotspot-media-audio" src={selectedMediaUrl} controls />}{selectedHotspot.kind === 'page' && selectedPageUrl && <iframe className="hotspot-media-page" src={selectedPageUrl} title={selectedHotspot.title} loading="lazy" referrerPolicy="strict-origin-when-cross-origin" allow="fullscreen; autoplay" />}{selectedHotspot.kind === 'page' && !selectedPageUrl && <p className="hotspot-modal-copy">Add a valid HTTP(S) page URL. Some websites block embedded viewing; use the new-tab option if that happens.</p>}{selectedHotspot.kind === 'info' && <p className="hotspot-modal-copy">This information hotspot is ready to be expanded with rich text and branded content in a later phase.</p>}{['image', 'video', 'audio'].includes(selectedHotspot.kind) && !selectedMediaUrl && <p className="hotspot-modal-copy">Add a direct media URL in the Inspector to preview this hotspot. Uploaded asset linking will follow in the Media Library phase.</p>}{selectedExternalUrl && <a className="hotspot-external-link" href={selectedExternalUrl} target="_blank" rel="noopener noreferrer"><ExternalLink size={14} /> {selectedHotspot.kind === 'page' ? 'Open page in new tab' : 'Open source in new tab'}</a>}</div></div>}
+    {showLayoutPanel && <div className="modal-backdrop tour-layout-backdrop" onClick={() => setShowLayoutPanel(false)}>
+      <section className="tour-layout-modal" role="dialog" aria-modal="true" aria-labelledby="tour-layout-title" onClick={(event) => event.stopPropagation()}>
+        <header className="tour-layout-header">
+          <div><div className="eyebrow">VISITOR EXPERIENCE DESIGNER</div><h2 id="tour-layout-title">Tour Layout & Welcome Screen</h2><p>Place visitor controls anywhere over the panorama, or group them into a shared toolbar. Design a welcome panel per scene with clickable buttons, images, and invisible action areas.</p></div>
+          <button className="modal-close" type="button" onClick={() => setShowLayoutPanel(false)} aria-label="Close layout editor"><X size={17} /></button>
+        </header>
+        <div className="tour-layout-tabs">
+          <button type="button" className={layoutTab === 'toolbar' ? 'active' : ''} onClick={() => { setLayoutTab('toolbar'); setSelectedLayoutElementId(tourLayout.toolbar.elements[0]?.id ?? null); }}>Overlay toolbar</button>
+          <button type="button" className={layoutTab === 'welcome' ? 'active' : ''} onClick={() => { setLayoutTab('welcome'); setSelectedLayoutElementId(tourLayout.welcome.elements[0]?.id ?? null); }}>Welcome screen</button>
+        </div>
+        <div className="tour-layout-workspace">
+          <div className="tour-layout-settings">
+            {layoutTab === 'toolbar' ? <>
+              <label className="layout-toggle"><input type="checkbox" checked={tourLayout.toolbar.enabled} onChange={(event) => updateLayoutArea('toolbar', { enabled: event.target.checked })} /> Enable custom overlay toolbar</label>
+              <div className="layout-form-grid">
+                <div><label className="field-label" htmlFor="layout-toolbar-mode">Arrangement</label><select id="layout-toolbar-mode" className="text-field compact" value={tourLayout.toolbar.mode} onChange={(event) => updateLayoutArea('toolbar', { mode: event.target.value as 'grouped' | 'free' })}><option value="grouped">Group buttons together</option><option value="free">Free placement</option></select></div>
+                <div><label className="field-label" htmlFor="layout-toolbar-edge">Default edge</label><select id="layout-toolbar-edge" className="text-field compact" value={tourLayout.toolbar.edge} onChange={(event) => updateLayoutArea('toolbar', { edge: event.target.value as 'top' | 'bottom', y: event.target.value === 'top' ? 8 : 92 })}><option value="top">Top</option><option value="bottom">Bottom</option></select></div>
+                <div><label className="field-label" htmlFor="layout-toolbar-x">Group X (%)</label><input id="layout-toolbar-x" className="text-field compact" type="number" min="0" max="100" value={tourLayout.toolbar.x} onChange={(event) => updateLayoutArea('toolbar', { x: clampNumber(Number(event.target.value), 0, 100) })} /></div>
+                <div><label className="field-label" htmlFor="layout-toolbar-y">Group Y (%)</label><input id="layout-toolbar-y" className="text-field compact" type="number" min="0" max="100" value={tourLayout.toolbar.y} onChange={(event) => updateLayoutArea('toolbar', { y: clampNumber(Number(event.target.value), 0, 100) })} /></div>
+              </div>
+              {tourLayout.toolbar.mode === 'grouped' && <><label className="field-label duration-label" htmlFor="layout-toolbar-gap">Space between buttons <strong>{tourLayout.toolbar.gap}px</strong></label><input id="layout-toolbar-gap" className="range-input" type="range" min="0" max="48" step="2" value={tourLayout.toolbar.gap} onChange={(event) => updateLayoutArea('toolbar', { gap: Number(event.target.value) })} /><div className="field-help">Drag any item in the preview to move the entire grouped toolbar.</div></>}
+            </> : <>
+              <label className="layout-toggle"><input type="checkbox" checked={tourLayout.welcome.enabled} onChange={(event) => updateLayoutArea('welcome', { enabled: event.target.checked })} /> Enable welcome screen</label>
+              <div className="layout-form-grid">
+                <div className="layout-field-wide"><label className="field-label" htmlFor="welcome-title">Title</label><input id="welcome-title" className="text-field compact" value={tourLayout.welcome.title} onChange={(event) => updateLayoutArea('welcome', { title: event.target.value })} /></div>
+                <div className="layout-field-wide"><label className="field-label" htmlFor="welcome-body">Description</label><textarea id="welcome-body" className="text-field compact layout-textarea" rows={3} value={tourLayout.welcome.body} onChange={(event) => updateLayoutArea('welcome', { body: event.target.value })} /></div>
+                <div><label className="field-label" htmlFor="welcome-width">Panel width <strong>{tourLayout.welcome.widthPercent}%</strong></label><input id="welcome-width" className="range-input" type="range" min="30" max="96" step="2" value={tourLayout.welcome.widthPercent} onChange={(event) => updateLayoutArea('welcome', { widthPercent: Number(event.target.value) })} /></div>
+                <div><label className="field-label" htmlFor="welcome-height">Panel height <strong>{tourLayout.welcome.heightPx}px</strong></label><input id="welcome-height" className="range-input" type="range" min="200" max="760" step="20" value={tourLayout.welcome.heightPx} onChange={(event) => updateLayoutArea('welcome', { heightPx: Number(event.target.value) })} /></div>
+                <div><label className="field-label" htmlFor="welcome-panel-opacity">Panel opacity <strong>{Math.round(tourLayout.welcome.panelOpacity * 100)}%</strong></label><input id="welcome-panel-opacity" className="range-input" type="range" min="0" max="1" step="0.05" value={tourLayout.welcome.panelOpacity} onChange={(event) => updateLayoutArea('welcome', { panelOpacity: Number(event.target.value) })} /></div>
+                <div><label className="field-label" htmlFor="welcome-backdrop-opacity">Overlay opacity <strong>{Math.round(tourLayout.welcome.backdropOpacity * 100)}%</strong></label><input id="welcome-backdrop-opacity" className="range-input" type="range" min="0" max="0.9" step="0.05" value={tourLayout.welcome.backdropOpacity} onChange={(event) => updateLayoutArea('welcome', { backdropOpacity: Number(event.target.value) })} /></div>
+              </div>
+              <div className="layout-welcome-options"><label><input type="checkbox" checked={tourLayout.welcome.showOnce} onChange={(event) => updateLayoutArea('welcome', { showOnce: event.target.checked })} /> Show once per visitor/browser</label><label><input type="checkbox" checked={tourLayout.welcome.showCloseButton} onChange={(event) => updateLayoutArea('welcome', { showCloseButton: event.target.checked })} /> Show close button</label></div>
+              <div className="layout-scene-assignment"><div className="field-label">Show welcome on these scenes</div>{project.scenes.map((scene) => <label key={scene.id}><input type="checkbox" checked={tourLayout.welcome.sceneIds.includes(scene.id)} onChange={(event) => updateLayoutArea('welcome', { sceneIds: event.target.checked ? [...tourLayout.welcome.sceneIds, scene.id] : tourLayout.welcome.sceneIds.filter((id) => id !== scene.id) })} /> {scene.name}</label>)}</div>
+            </>}
+            <div className="layout-elements-heading"><strong>{layoutTab === 'toolbar' ? 'Toolbar elements' : 'Welcome screen elements'}</strong><span className="count-pill">{layoutElements.length}</span></div>
+            <div className="layout-add-buttons">
+              <button className="mini-button" type="button" onClick={() => addLayoutElement(layoutTab, 'button')}><Plus size={13} /> Button</button>
+              <button className="mini-button" type="button" onClick={() => addLayoutElement(layoutTab, 'image')}><Image size={13} /> Image</button>
+              <button className="mini-button" type="button" onClick={() => addLayoutElement(layoutTab, 'hotspot')}><Plus size={13} /> Hidden hotspot</button>
+            </div>
+            <div className="layout-element-list">
+              {layoutElements.map((element) => <button type="button" key={element.id} className={`layout-element-row ${selectedLayoutElement?.id === element.id ? 'selected' : ''}`} onClick={() => setSelectedLayoutElementId(element.id)}>
+                <span className={`layout-element-kind ${element.type}`}>{element.type === 'image' ? <Image size={14} /> : element.type === 'hotspot' ? <Globe2 size={14} /> : <LayoutDashboard size={14} />}</span>
+                <span><strong>{element.label || (element.type === 'hotspot' ? 'Hidden hotspot' : element.type)}</strong><small>{element.action}</small></span>
+              </button>)}
+            </div>
+            {selectedLayoutElement && <div className="layout-selected-editor">
+              <div className="section-heading"><strong>Edit selected element</strong><button className="mini-icon-button" type="button" onClick={() => removeLayoutElement(layoutTab, selectedLayoutElement.id)} aria-label="Delete layout element"><Trash2 size={13} /></button></div>
+              <label className="field-label" htmlFor="layout-element-label">Label / accessible name</label><input id="layout-element-label" className="text-field compact" value={selectedLayoutElement.label} onChange={(event) => updateLayoutElement(layoutTab, selectedLayoutElement.id, { label: event.target.value })} />
+              {selectedLayoutElement.type === 'image' && <><label className="field-label" htmlFor="layout-element-image-url">Image URL (optional)</label><input id="layout-element-image-url" className="text-field compact" type="url" placeholder="https://..." value={selectedLayoutElement.imageUrl ?? ''} onChange={(event) => updateLayoutElement(layoutTab, selectedLayoutElement.id, { imageUrl: event.target.value || undefined, imageAssetId: undefined })} /><button type="button" className="mini-button" onClick={() => { layoutImageTargetRef.current = { area: layoutTab, elementId: selectedLayoutElement.id }; layoutImageInputRef.current?.click(); }}>Upload image from this device</button>{selectedLayoutElement.imageAssetId && <div className="field-help">Using uploaded asset: {project.assets.find((asset) => asset.id === selectedLayoutElement.imageAssetId)?.name ?? 'image'}</div>}</>}
+              <label className="field-label" htmlFor="layout-element-action">Click action</label><select id="layout-element-action" className="text-field compact" value={selectedLayoutElement.action} onChange={(event) => updateLayoutElement(layoutTab, selectedLayoutElement.id, { action: event.target.value as TourUiAction })}><option value="none">Do nothing</option><option value="previous-scene">Previous scene</option><option value="next-scene">Next scene</option><option value="welcome">Open welcome screen</option><option value="close-welcome">Close welcome screen</option><option value="camera-reset">Adjust camera / reset view</option><option value="scene-menu">Open Go To / scene menu</option><option value="scene">Go to a specific scene</option><option value="sound-toggle">Toggle sound</option><option value="fullscreen">Toggle fullscreen</option><option value="map">Open Map (URL)</option><option value="url">Open external URL (Join Event)</option><option value="page">Open page/document in overlay</option></select>
+              {selectedLayoutElement.action === 'scene' && <><label className="field-label" htmlFor="layout-element-scene">Target scene</label><select id="layout-element-scene" className="text-field compact" value={selectedLayoutElement.targetSceneId ?? ''} onChange={(event) => updateLayoutElement(layoutTab, selectedLayoutElement.id, { targetSceneId: event.target.value || undefined })}><option value="">Choose scene…</option>{project.scenes.map((scene) => <option key={scene.id} value={scene.id}>{scene.name}</option>)}</select></>}
+              {(['url', 'page', 'map'].includes(selectedLayoutElement.action)) && <><label className="field-label" htmlFor="layout-element-url">{selectedLayoutElement.action === 'map' ? 'Map URL' : 'Destination URL'}</label><input id="layout-element-url" className="text-field compact" type="url" placeholder="https://..." value={selectedLayoutElement.url ?? ''} onChange={(event) => updateLayoutElement(layoutTab, selectedLayoutElement.id, { url: event.target.value || undefined })} /></>}
+              {layoutTab === 'toolbar' && tourLayout.toolbar.mode === 'free' || layoutTab === 'welcome' ? <div className="layout-form-grid"><div><label className="field-label" htmlFor="layout-element-x">X position (%)</label><input id="layout-element-x" className="text-field compact" type="number" min="0" max="100" value={selectedLayoutElement.x} onChange={(event) => updateLayoutElement(layoutTab, selectedLayoutElement.id, { x: clampNumber(Number(event.target.value), 0, 100) })} /></div><div><label className="field-label" htmlFor="layout-element-y">Y position (%)</label><input id="layout-element-y" className="text-field compact" type="number" min="0" max="100" value={selectedLayoutElement.y} onChange={(event) => updateLayoutElement(layoutTab, selectedLayoutElement.id, { y: clampNumber(Number(event.target.value), 0, 100) })} /></div></div> : null}
+              <div className="layout-form-grid"><div><label className="field-label" htmlFor="layout-element-width">Width (px)</label><input id="layout-element-width" className="text-field compact" type="number" min="24" max="1000" value={selectedLayoutElement.width} onChange={(event) => updateLayoutElement(layoutTab, selectedLayoutElement.id, { width: clampNumber(Number(event.target.value), 24, 1000) })} /></div><div><label className="field-label" htmlFor="layout-element-height">Height (px)</label><input id="layout-element-height" className="text-field compact" type="number" min="24" max="800" value={selectedLayoutElement.height} onChange={(event) => updateLayoutElement(layoutTab, selectedLayoutElement.id, { height: clampNumber(Number(event.target.value), 24, 800) })} /></div></div>
+              {selectedLayoutElement.type !== 'hotspot' && <label className="layout-toggle"><input type="checkbox" checked={selectedLayoutElement.visible !== false} onChange={(event) => updateLayoutElement(layoutTab, selectedLayoutElement.id, { visible: event.target.checked })} /> Show visual element (disable for invisible hit area)</label>}
+            </div>}
+          </div>
+          <div className="tour-layout-preview-column">
+            <div className="tour-layout-preview-header"><strong>Live layout preview</strong><span>Drag elements to reposition</span></div>
+            <div ref={layoutPreviewRef} className={`tour-layout-preview ${layoutTab === 'welcome' ? 'welcome-preview' : ''}`} onPointerMove={moveLayoutElementDrag} onPointerUp={endLayoutElementDrag} onPointerCancel={endLayoutElementDrag}>
+              {layoutTab === 'toolbar' ? <>
+                <div className="tour-layout-preview-scene">360° Panorama preview</div>
+                {tourLayout.toolbar.enabled && <div className={`tour-layout-preview-toolbar ${tourLayout.toolbar.mode}`} style={tourLayout.toolbar.mode === 'grouped' ? { left: `${tourLayout.toolbar.x}%`, top: `${tourLayout.toolbar.y}%`, gap: `${tourLayout.toolbar.gap}px`, transform: 'translate(-50%, -50%)' } : {}}>
+                  {tourLayout.toolbar.elements.map((element) => renderLayoutElementPreview(element, 'toolbar', tourLayout.toolbar.mode === 'grouped'))}
+                </div>}
+                {!tourLayout.toolbar.enabled && <div className="tour-layout-preview-empty">Enable the toolbar to show controls over your tour.</div>}
+              </> : <>
+                <div className="tour-layout-preview-scene">Panorama remains visible behind this screen</div>
+                <div className="tour-layout-preview-backdrop" style={{ background: `rgba(7, 10, 18, ${clampNumber(tourLayout.welcome.backdropOpacity, 0, 0.9)})` }} />
+                <div className="tour-layout-preview-panel" style={{ width: `${clampNumber(tourLayout.welcome.widthPercent, 30, 96)}%`, height: `${clampNumber(tourLayout.welcome.heightPx, 200, 760)}px`, background: `rgba(245, 247, 250, ${clampNumber(tourLayout.welcome.panelOpacity, 0, 1)})` }}>
+                  {tourLayout.welcome.showCloseButton && <span className="tour-layout-preview-close">×</span>}
+                  <h3>{tourLayout.welcome.title}</h3><p>{tourLayout.welcome.body}</p>
+                  {tourLayout.welcome.elements.map((element) => renderLayoutElementPreview(element, 'welcome'))}
+                </div>
+                {!tourLayout.welcome.enabled && <div className="tour-layout-preview-empty">Welcome screen disabled.</div>}
+              </>}
+            </div>
+            <div className="layout-preview-help">The preview is schematic. Test the exported tour at desktop and mobile sizes before publishing.</div>
+          </div>
+        </div>
+        <footer className="tour-layout-footer"><span>Changes autosave to the current project.</span><button type="button" className="button button-primary" onClick={() => setShowLayoutPanel(false)}>Done</button></footer>
+      </section>
+    </div>}
     {showThemePanel && <div className="modal-backdrop theme-backdrop" onClick={() => setShowThemePanel(false)}>
       <section className="theme-modal" role="dialog" aria-modal="true" aria-labelledby="theme-panel-title" onClick={(event) => event.stopPropagation()}>
         <button className="modal-close" type="button" onClick={() => setShowThemePanel(false)} aria-label="Close theme settings"><X size={17} /></button>
@@ -421,7 +669,7 @@ export default function App() {
       </section>
     </div>}
     {showPublish && <div className="modal-backdrop" onClick={() => setShowPublish(false)}><div className="publish-modal" onClick={(e) => e.stopPropagation()}><div className="modal-icon"><Globe2 size={22} /></div><button className="modal-close" onClick={() => setShowPublish(false)} aria-label="Close"><X size={17} /></button><div className="eyebrow">PRODUCTION WORKFLOW</div><h2>Build for the web</h2><p>Build a standalone tour bundle with its own viewer runtime, project configuration, panoramas, hotspots, and included media. Extract the ZIP into an Nginx directory and share that URL; visitors will not see the Studio editor.</p><div className="build-checklist"><span><Check size={15} /> Save / resume draft with local media</span><span><Check size={15} /> Export / import project configuration</span><span><Check size={15} /> Interactive 360° viewer and scene navigation</span><span><Check size={15} /> Multi-resolution tile manifest + viewer support</span><span><Check size={15} /> Standalone player runtime + Nginx deployment ZIP</span></div><button className="button button-primary full-width" onClick={() => void handleBuildProductionTour()} disabled={buildingProduction}>{buildingProduction ? productionStatus : 'Build standalone tour (.zip)'}</button></div></div>}
-    <footer className="bottom-status"><span><span className={`status-dot ${saveState}`} /> Workspace ready</span><span>360 Studio Demo <span className="footer-divider">/</span> v0.11.0</span><span>Project schema v1</span></footer>
+    <footer className="bottom-status"><span><span className={`status-dot ${saveState}`} /> Workspace ready</span><span>360 Studio Demo <span className="footer-divider">/</span> v0.13.0</span><span>Project schema v1</span></footer>
   </div>;
 }
 

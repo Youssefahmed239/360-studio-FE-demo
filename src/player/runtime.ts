@@ -78,7 +78,7 @@ class StandaloneTourPlayer {
           <div class="tour-scene-heading"><span>YOU ARE EXPLORING</span><strong data-scene-title></strong></div>
           <nav class="tour-controls" aria-label="Tour controls"><button type="button" data-action="toggle-scenes" aria-expanded="false">Scenes</button><button type="button" data-action="sound" aria-pressed="false">Sound off</button><button type="button" data-action="fullscreen">Fullscreen</button></nav>
         </header>
-        <main class="tour-main"><aside class="tour-scene-menu" aria-label="Tour scenes" hidden></aside><section class="tour-stage"><div class="tour-canvas" aria-label="360-degree virtual tour"></div><div class="tour-loader" role="status">Preparing your experience…</div><div class="tour-error" role="alert" hidden></div><div class="tour-stage-hint">Drag to look around <span>·</span> Scroll or pinch to zoom</div><div class="tour-popover-root"></div></section></main>
+        <main class="tour-main"><aside class="tour-scene-menu" aria-label="Tour scenes" hidden></aside><section class="tour-stage"><div class="tour-canvas" aria-label="360-degree virtual tour"></div><div class="tour-layout-root"></div><div class="tour-welcome-root" hidden></div><div class="tour-loader" role="status">Preparing your experience…</div><div class="tour-error" role="alert" hidden></div><div class="tour-stage-hint">Drag to look around <span>·</span> Scroll or pinch to zoom</div><div class="tour-popover-root"></div></section></main>
         <footer class="tour-footer"><span data-tour-title></span><span><i></i> INTERACTIVE 360° EXPERIENCE</span></footer>
       </div>`;
     this.canvas = this.root.querySelector<HTMLElement>('.tour-canvas')!;
@@ -111,8 +111,258 @@ class StandaloneTourPlayer {
     this.root.querySelector<HTMLButtonElement>('[data-action="fullscreen"]')!.hidden = project.settings.allowFullscreen === false || project.settings.showFullscreenControl === false;
     this.root.querySelector<HTMLElement>('.tour-scene-heading')!.hidden = project.settings.showSceneTitle === false;
     this.root.querySelector<HTMLElement>('.tour-footer')!.hidden = project.settings.showFooter === false;
+    const header = this.root.querySelector<HTMLElement>('.tour-header')!;
+    const sceneMenuButton = this.root.querySelector<HTMLButtonElement>('.tour-controls [data-action="toggle-scenes"]')!;
+    const headerHasVisibleControl = !brandButton.hidden || !this.root.querySelector<HTMLElement>('.tour-scene-heading')!.hidden || !sceneMenuButton.hidden || !this.soundButton.hidden || !this.root.querySelector<HTMLButtonElement>('[data-action="fullscreen"]')!.hidden;
+    header.hidden = !headerHasVisibleControl;
     this.renderSceneMenu();
+    this.renderLayout();
     this.bindControls();
+    this.bindLayoutControls();
+  }
+
+  private layoutImageUrl(element: NonNullable<TourProject['layout']>['toolbar']['elements'][number]): string | undefined {
+    return this.assetUrl(element.imageAssetId) ?? safeHttpUrl(element.imageUrl);
+  }
+
+  private makeLayoutControl(element: NonNullable<TourProject['layout']>['toolbar']['elements'][number], area: 'toolbar' | 'welcome', grouped = false): HTMLButtonElement {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = `tour-ui-element tour-ui-${element.type}${element.visible === false || element.type === 'hotspot' ? ' tour-ui-invisible' : ''}`;
+    button.dataset.layoutElementId = element.id;
+    button.dataset.layoutArea = area;
+    button.setAttribute('aria-label', element.label || (element.type === 'hotspot' ? 'Interactive area' : 'Tour control'));
+    button.title = element.type === 'hotspot' ? (element.label || 'Interactive area') : element.label;
+    button.style.width = `${Math.max(24, Math.min(1000, element.width || 120))}px`;
+    button.style.height = `${Math.max(24, Math.min(800, element.height || 40))}px`;
+    if (!grouped) {
+      button.style.position = 'absolute';
+      button.style.left = `${Math.max(0, Math.min(100, element.x))}%`;
+      button.style.top = `${Math.max(0, Math.min(100, element.y))}%`;
+      button.style.transform = 'translate(-50%, -50%)';
+    }
+    if (element.type === 'image') {
+      const imageUrl = this.layoutImageUrl(element);
+      if (imageUrl) {
+        const image = document.createElement('img');
+        image.src = imageUrl;
+        image.alt = element.label;
+        image.draggable = false;
+        button.append(image);
+      } else if (element.visible !== false) {
+        button.textContent = element.label || 'Image button';
+      }
+    } else if (element.type === 'button' && element.visible !== false) {
+      button.textContent = element.label || 'Button';
+    }
+    return button;
+  }
+
+  private renderLayout(): void {
+    const root = this.root.querySelector<HTMLElement>('.tour-layout-root');
+    if (!root) return;
+    root.replaceChildren();
+    const toolbar = this.project.layout?.toolbar;
+    if (!toolbar?.enabled) return;
+    const layer = document.createElement('div');
+    layer.className = `tour-layout-toolbar ${toolbar.mode === 'grouped' ? 'is-grouped' : 'is-free'} edge-${toolbar.edge}`;
+    layer.style.gap = `${Math.max(0, Math.min(48, toolbar.gap ?? 10))}px`;
+    if (toolbar.mode === 'grouped') {
+      layer.style.left = `${Math.max(0, Math.min(100, toolbar.x ?? 50))}%`;
+      layer.style.top = `${Math.max(0, Math.min(100, toolbar.y ?? (toolbar.edge === 'bottom' ? 92 : 8)))}%`;
+      layer.style.transform = 'translate(-50%, -50%)';
+    }
+    toolbar.elements.forEach((element) => layer.append(this.makeLayoutControl(element, 'toolbar', toolbar.mode === 'grouped')));
+    root.append(layer);
+    const hint = this.root.querySelector<HTMLElement>('.tour-stage-hint');
+    if (hint) hint.hidden = true;
+  }
+
+  private bindLayoutControls(): void {
+    const toolbarRoot = this.root.querySelector<HTMLElement>('.tour-layout-root');
+    const welcomeRoot = this.root.querySelector<HTMLElement>('.tour-welcome-root');
+    const handleClick = (event: Event, area: 'toolbar' | 'welcome') => {
+      const target = event.target;
+      if (!(target instanceof Element)) return;
+      const control = target.closest<HTMLButtonElement>('button[data-layout-element-id]');
+      if (!control) return;
+      const id = control.dataset.layoutElementId;
+      const element = id ? this.project.layout?.[area].elements.find((candidate) => candidate.id === id) : undefined;
+      if (element) {
+        event.preventDefault();
+        void this.activateLayoutElement(element);
+      }
+    };
+    toolbarRoot?.addEventListener('click', (event) => handleClick(event, 'toolbar'));
+    welcomeRoot?.addEventListener('click', (event) => handleClick(event, 'welcome'));
+    welcomeRoot?.addEventListener('click', (event) => {
+      if (event.target === welcomeRoot) this.closeWelcome(true);
+    });
+  }
+
+  private welcomeStorageKey(): string { return `360-studio-welcome-seen:${this.project.id}`; }
+
+  private maybeShowWelcome(sceneId: string): void {
+    const root = this.root.querySelector<HTMLElement>('.tour-welcome-root');
+    if (root) { root.replaceChildren(); root.hidden = true; }
+    const welcome = this.project.layout?.welcome;
+    if (!welcome?.enabled || !welcome.sceneIds.includes(sceneId)) return;
+    if (welcome.showOnce) {
+      try { if (window.localStorage.getItem(this.welcomeStorageKey()) === '1') return; }
+      catch { /* Storage may be unavailable in private browsing. */ }
+    }
+    this.showWelcome(false);
+  }
+
+  private closeWelcome(markViewed: boolean): void {
+    const root = this.root.querySelector<HTMLElement>('.tour-welcome-root');
+    if (root) { root.replaceChildren(); root.hidden = true; }
+    if (markViewed && this.project.layout?.welcome.showOnce) {
+      try { window.localStorage.setItem(this.welcomeStorageKey(), '1'); }
+      catch { /* Welcome still closes even if storage is unavailable. */ }
+    }
+  }
+
+  private showWelcome(force = true): void {
+    const welcome = this.project.layout?.welcome;
+    const root = this.root.querySelector<HTMLElement>('.tour-welcome-root');
+    if (!welcome?.enabled || !root) return;
+    if (!force && welcome.showOnce) {
+      try { if (window.localStorage.getItem(this.welcomeStorageKey()) === '1') return; }
+      catch { /* Ignore unavailable storage. */ }
+    }
+    root.replaceChildren();
+    root.hidden = false;
+    root.style.background = `rgba(7, 10, 18, ${Math.max(0, Math.min(0.9, welcome.backdropOpacity ?? 0.24))})`;
+    const panel = document.createElement('section');
+    panel.className = 'tour-welcome-panel';
+    const width = Math.max(30, Math.min(96, welcome.widthPercent ?? 72));
+    const height = Math.max(200, Math.min(760, welcome.heightPx ?? 440));
+    const panelOpacity = Math.max(0, Math.min(1, welcome.panelOpacity ?? 0.94));
+    const bg = safeThemeColor(this.project.settings.backgroundColor, '#f5f7fa');
+    const rgb = bg.match(/^#([0-9a-f]{6})$/i)?.[1] ?? 'f5f7fa';
+    panel.style.width = `${width}%`;
+    panel.style.height = `${height}px`;
+    panel.style.background = `rgba(${parseInt(rgb.slice(0, 2), 16)},${parseInt(rgb.slice(2, 4), 16)},${parseInt(rgb.slice(4, 6), 16)},${panelOpacity})`;
+    panel.style.color = safeThemeColor(this.project.settings.textColor, '#111827');
+    panel.style.setProperty('--welcome-accent', safeColor(this.project.settings.accentColor));
+    if (welcome.showCloseButton !== false) {
+      const close = document.createElement('button');
+      close.type = 'button';
+      close.className = 'tour-welcome-close';
+      close.setAttribute('aria-label', 'Close welcome screen');
+      close.textContent = '×';
+      close.addEventListener('click', () => this.closeWelcome(true));
+      panel.append(close);
+    }
+    const title = document.createElement('h2');
+    title.textContent = welcome.title || 'Welcome';
+    const body = document.createElement('p');
+    body.textContent = welcome.body || '';
+    panel.append(title, body);
+    const elements = welcome.elements ?? [];
+    elements.forEach((element) => panel.append(this.makeLayoutControl(element, 'welcome')));
+    panel.addEventListener('click', (event) => event.stopPropagation());
+    root.append(panel);
+  }
+
+  private async activateLayoutElement(element: NonNullable<TourProject['layout']>['toolbar']['elements'][number]): Promise<void> {
+    switch (element.action) {
+      case 'previous-scene':
+      case 'next-scene': {
+        const index = this.project.scenes.findIndex((scene) => scene.id === this.currentSceneId);
+        const delta = element.action === 'next-scene' ? 1 : -1;
+        const target = this.project.scenes[index + delta];
+        if (target) await this.loadScene(target.id);
+        return;
+      }
+      case 'scene':
+        if (element.targetSceneId) await this.loadScene(element.targetSceneId);
+        return;
+      case 'welcome':
+        this.showWelcome(true);
+        return;
+      case 'close-welcome':
+        this.closeWelcome(true);
+        return;
+      case 'camera-reset': {
+        const scene = this.currentScene();
+        if (scene && this.viewer) {
+          await this.viewer.animate({ yaw: `${scene.initialYaw}deg`, pitch: `${scene.initialPitch}deg`, zoom: scene.initialZoom > 0 ? scene.initialZoom : 50, speed: 450, easing: 'inOutSine' });
+        }
+        return;
+      }
+      case 'scene-menu':
+        this.root.querySelector<HTMLButtonElement>('[data-action="toggle-scenes"]')?.click();
+        return;
+      case 'sound-toggle':
+        this.soundButton.click();
+        return;
+      case 'fullscreen':
+        if (document.fullscreenElement) await document.exitFullscreen();
+        else await this.root.requestFullscreen().catch(() => this.showError('Fullscreen is not available in this browser.'));
+        return;
+      case 'map': {
+        const url = safeHttpUrl(element.url);
+        if (url) this.openLayoutPage(url, element.label || 'Map');
+        else this.showError('Add a valid HTTP(S) map URL to this layout element.');
+        return;
+      }
+      case 'url': {
+        const url = safeHttpUrl(element.url);
+        if (url) window.open(url, '_blank', 'noopener,noreferrer');
+        else this.showError('Add a valid HTTP(S) URL to this layout element.');
+        return;
+      }
+      case 'page': {
+        const url = safeHttpUrl(element.url);
+        if (url) this.openLayoutPage(url, element.label || 'Page');
+        else this.showError('Add a valid HTTP(S) URL to this page/document element.');
+        return;
+      }
+      case 'none':
+      default:
+        return;
+    }
+  }
+
+  private openLayoutPage(url: string, titleText: string): void {
+    this.closeMedia();
+    const popover = this.root.querySelector<HTMLElement>('.tour-popover-root');
+    if (!popover) return;
+    const backdrop = document.createElement('div');
+    backdrop.className = 'tour-modal-backdrop';
+    backdrop.addEventListener('click', () => this.closeMedia());
+    const panel = document.createElement('section');
+    panel.className = 'tour-media-modal tour-page-modal';
+    panel.setAttribute('role', 'dialog');
+    panel.setAttribute('aria-modal', 'true');
+    panel.setAttribute('aria-label', titleText);
+    const close = document.createElement('button');
+    close.className = 'tour-media-close';
+    close.type = 'button';
+    close.textContent = '×';
+    close.setAttribute('aria-label', 'Close');
+    close.addEventListener('click', () => this.closeMedia());
+    const title = document.createElement('h2');
+    title.textContent = titleText;
+    const frame = document.createElement('iframe');
+    frame.src = url;
+    frame.title = titleText;
+    frame.className = 'tour-media-page-frame';
+    frame.loading = 'lazy';
+    frame.referrerPolicy = 'strict-origin-when-cross-origin';
+    frame.allow = 'fullscreen; autoplay';
+    const external = document.createElement('a');
+    external.href = url;
+    external.target = '_blank';
+    external.rel = 'noopener noreferrer';
+    external.className = 'tour-media-external';
+    external.textContent = 'Open page in a new tab';
+    panel.append(close, title, frame, external);
+    panel.addEventListener('click', (event) => event.stopPropagation());
+    backdrop.append(panel);
+    popover.append(backdrop);
   }
 
   async start(): Promise<void> {
@@ -347,6 +597,7 @@ class StandaloneTourPlayer {
     });
     if (!initial) this.sceneMenu.hidden = true;
     this.syncSceneAudio(scene);
+    this.maybeShowWelcome(scene.id);
 
     if (!source) {
       this.viewer?.destroy();
