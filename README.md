@@ -125,3 +125,10 @@ The build script bundles the player runtime into the static editor output. ZIP64
 - Choose **Invisible clickable area** to hide a hotspot in Preview and the published tour while keeping a configurable click target. The editor displays a locator so hidden targets can still be found and adjusted.
 - Choose **Link** to open an HTTP(S) destination in a new tab, or **Web page / document** to display an HTTP(S) HTML page or browser-supported document (such as PDF) in an iframe overlay. A new-tab fallback is provided because some websites block iframe embedding with their own security headers.
 - The project schema stays at v1; all new appearance fields are optional so older projects continue to load.
+
+## Spatial media and audio timing (v0.7.0)
+
+- Image/video hotspots can render as media surfaces anchored at spherical yaw/pitch coordinates rather than only opening a popup. Width and height are configurable in the editor. Video supports controls, loop and muted autoplay options.
+- Scene ambience supports a source offset, delayed start, stop-after duration, fade-in and fade-out, plus loop and volume. Browsers may require a visitor gesture before sound is allowed.
+- New spatial and audio settings are optional properties in the schema-v1 project, so older project files remain readable.
+- The editor and standalone production player share these behaviours. Verify a freshly exported production bundle before deploying it.

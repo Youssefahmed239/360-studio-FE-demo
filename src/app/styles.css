@@ -68,3 +68,11 @@
 @keyframes studioHotspotPulse{0%,100%{filter:drop-shadow(0 0 0 color-mix(in srgb,var(--hotspot-color,#a3e635) 0%,transparent));}50%{filter:drop-shadow(0 0 9px var(--hotspot-color,#a3e635));transform:scale(1.06);}}
 @keyframes studioHotspotBounce{0%,100%{transform:translateY(0);}50%{transform:translateY(-5px);}}
 @keyframes studioHotspotRotate{to{transform:rotate(360deg);}}
+
+/* 360-STUDIO-SPATIAL-MEDIA-AUDIO-V0.7.0 */
+.studio-spatial-media{display:block;overflow:hidden;background:transparent;border:0;border-radius:0;box-shadow:none;pointer-events:auto;}
+.studio-spatial-image img{display:block;width:100%;height:100%;object-fit:contain;background:transparent;border:0;border-radius:0;box-shadow:none;}
+.studio-spatial-video video{display:block;width:100%;height:100%;object-fit:contain;background:#080b10;border:0;border-radius:0;}
+.hotspot-spatial-settings{margin-top:13px;padding-top:13px;border-top:1px solid #2c3744;}
+.audio-timing-grid{display:grid;grid-template-columns:1fr 1fr;gap:9px;margin:13px 0;}
+.audio-timing-grid .text-field{margin-top:7px;}

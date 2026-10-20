@@ -24,3 +24,8 @@
 @keyframes tourHotspotPulse{0%,100%{filter:drop-shadow(0 0 0 transparent);}50%{filter:drop-shadow(0 0 9px var(--hotspot-color,var(--tour-accent)));transform:scale(1.06);}}
 @keyframes tourHotspotBounce{0%,100%{transform:translateY(0);}50%{transform:translateY(-5px);}}
 @keyframes tourHotspotRotate{to{transform:rotate(360deg);}}
+
+/* 360-STUDIO-SPATIAL-MEDIA-AUDIO-V0.7.0 */
+.tour-spatial-media{display:block;overflow:hidden;background:transparent;border:0;border-radius:0;box-shadow:none;pointer-events:auto;}
+.tour-spatial-image img{display:block;width:100%;height:100%;object-fit:contain;background:transparent;border:0;border-radius:0;box-shadow:none;}
+.tour-spatial-video video{display:block;width:100%;height:100%;object-fit:contain;background:#080b10;border:0;border-radius:0;}

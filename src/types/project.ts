@@ -53,6 +53,19 @@ export interface TourHotspot {
   assetId?: string;
   url?: string;
   appearance?: HotspotAppearance;
+  /** Optional image/video surface positioned inside the 360 scene instead of opening a popup. */
+  spatialMedia?: SpatialMediaSettings;
+}
+
+export interface SpatialMediaSettings {
+  /** Render image/video as a marker-sized media surface positioned in spherical coordinates. */
+  enabled?: boolean;
+  width?: number;
+  height?: number;
+  autoplay?: boolean;
+  loop?: boolean;
+  /** Defaults to true for autoplay compatibility. */
+  muted?: boolean;
 }
 
 export interface TourScene {
@@ -66,7 +79,7 @@ export interface TourScene {
   initialPitch: number;
   initialZoom: number;
   transition: { kind: TransitionKind; durationMs: number };
-  audio?: { assetId?: string; url?: string; autoplayAfterGesture: boolean; loop: boolean; volume: number };
+  audio?: { assetId?: string; url?: string; autoplayAfterGesture: boolean; loop: boolean; volume: number; startOffsetSeconds?: number; delaySeconds?: number; stopAfterSeconds?: number; fadeInSeconds?: number; fadeOutSeconds?: number };
   hotspots: TourHotspot[];
 }
 
@@ -91,3 +104,5 @@ export interface TourProject {
 }
 
 /* 360-STUDIO-HOTSPOTS-V0.6.1 */
+
+/* 360-STUDIO-SPATIAL-MEDIA-AUDIO-V0.7.0 */

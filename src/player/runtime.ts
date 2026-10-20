@@ -55,6 +55,10 @@ class StandaloneTourPlayer {
   private soundEnabled = false;
   private audio = new Audio();
   private transitionSequence = 0;
+  private audioScheduleToken = 0;
+  private audioStartTimer: number | undefined;
+  private audioStopTimer: number | undefined;
+  private audioFadeTimer: number | undefined;
   private readonly baseUrl = new URL('./', window.location.href);
 
   constructor(root: HTMLElement, project: RuntimeProject, manifest: ArchiveManifest) {
@@ -96,6 +100,7 @@ class StandaloneTourPlayer {
 
   destroy(): void {
     this.transitionSequence += 1;
+    this.cancelAudioTimers();
     this.audio.pause();
     this.viewer?.destroy();
     this.viewer = null;
@@ -121,6 +126,7 @@ class StandaloneTourPlayer {
         this.setSoundStatus('Sound on');
       } else {
         this.soundButton.setAttribute('aria-pressed', 'false');
+        this.cancelAudioTimers();
         this.audio.pause();
         this.setSoundStatus('Sound off');
       }
@@ -183,6 +189,7 @@ class StandaloneTourPlayer {
       const color = safeColor(appearance.color);
       const hidden = mode === 'invisible';
       const imageUrl = this.assetUrl(appearance.imageAssetId) ?? appearance.imageUrl;
+      const mediaUrl = this.assetUrl(hotspot.assetId) ?? hotspot.url;
       const showLabel = appearance.showLabel !== false;
       const animation = appearance.animation && appearance.animation !== 'none' ? 'tour-hotspot-' + appearance.animation : '';
       const shape = 'tour-hotspot-' + (appearance.shape ?? 'pill');
@@ -190,7 +197,19 @@ class StandaloneTourPlayer {
       let html: string;
       let width: number;
       let height: number;
-      if (hidden) {
+      if (hotspot.spatialMedia?.enabled && (hotspot.kind === 'image' || hotspot.kind === 'video') && mediaUrl) {
+        const mediaWidth = Math.max(96, Math.min(960, hotspot.spatialMedia?.width ?? 320));
+        const mediaHeight = Math.max(64, Math.min(720, hotspot.spatialMedia?.height ?? 180));
+        if (hotspot.kind === 'image') {
+          html = '<div class="tour-spatial-media tour-spatial-image" style="width:' + mediaWidth + 'px;height:' + mediaHeight + 'px"><img src="' + htmlEscape(mediaUrl) + '" alt="' + htmlEscape(hotspot.title) + '" /></div>';
+        } else {
+          const autoplay = hotspot.spatialMedia?.autoplay ? ' autoplay' : '';
+          const loop = hotspot.spatialMedia?.loop ? ' loop' : '';
+          const muted = (hotspot.spatialMedia?.muted ?? true) ? ' muted' : '';
+          html = '<div class="tour-spatial-media tour-spatial-video" style="width:' + mediaWidth + 'px;height:' + mediaHeight + 'px"><video src="' + htmlEscape(mediaUrl) + '" width="' + mediaWidth + '" height="' + mediaHeight + '" controls playsinline' + autoplay + loop + muted + '></video></div>';
+        }
+        width = mediaWidth; height = mediaHeight;
+      } else if (hidden) {
         // Zero-opacity markup retains a click target without exposing an icon or tooltip to visitors.
         html = `<div class="tour-hotspot-invisible-hit" style="width:${size}px;height:${size}px" aria-label="${htmlEscape(hotspot.title)}"></div>`;
         width = size; height = size;
@@ -231,7 +250,7 @@ class StandaloneTourPlayer {
     this.markerPlugin.addEventListener('select-marker', ({ marker }) => {
       const hotspotId = marker.data?.hotspotId ?? marker.id;
       const hotspot = this.currentScene()?.hotspots.find((item) => item.id === hotspotId);
-      if (hotspot) void this.activateHotspot(hotspot);
+      if (hotspot && !(hotspot.spatialMedia?.enabled && (hotspot.kind === 'image' || hotspot.kind === 'video'))) void this.activateHotspot(hotspot);
     });
   }
 
@@ -368,29 +387,107 @@ class StandaloneTourPlayer {
   }
 
   private sceneAudioUrl(scene: RuntimeScene): string | undefined { return this.assetUrl(scene.audio?.assetId) ?? scene.audio?.url; }
+  private cancelAudioTimers(): number {
+    this.audioScheduleToken += 1;
+    if (this.audioStartTimer !== undefined) window.clearTimeout(this.audioStartTimer);
+    if (this.audioStopTimer !== undefined) window.clearTimeout(this.audioStopTimer);
+    if (this.audioFadeTimer !== undefined) window.clearInterval(this.audioFadeTimer);
+    this.audioStartTimer = undefined;
+    this.audioStopTimer = undefined;
+    this.audioFadeTimer = undefined;
+    return this.audioScheduleToken;
+  }
+
+  private fadeAudio(from: number, to: number, durationMs: number, token: number, onComplete?: () => void): void {
+    if (this.audioFadeTimer !== undefined) window.clearInterval(this.audioFadeTimer);
+    const start = Date.now();
+    const duration = Math.max(1, durationMs);
+    this.audio.volume = Math.max(0, Math.min(1, from));
+    this.audioFadeTimer = window.setInterval(() => {
+      if (token !== this.audioScheduleToken) {
+        if (this.audioFadeTimer !== undefined) window.clearInterval(this.audioFadeTimer);
+        this.audioFadeTimer = undefined;
+        return;
+      }
+      const progress = Math.min(1, (Date.now() - start) / duration);
+      this.audio.volume = Math.max(0, Math.min(1, from + (to - from) * progress));
+      if (progress >= 1) {
+        if (this.audioFadeTimer !== undefined) window.clearInterval(this.audioFadeTimer);
+        this.audioFadeTimer = undefined;
+        onComplete?.();
+      }
+    }, 40);
+  }
+
+  private scheduleSceneAudio(scene: RuntimeScene, token: number): void {
+    const config = scene.audio;
+    if (!config) return;
+    const delayMs = Math.max(0, config.delaySeconds ?? 0) * 1000;
+    const targetVolume = Math.max(0, Math.min(1, config.volume ?? 0.7));
+    this.audioStartTimer = window.setTimeout(() => {
+      if (token !== this.audioScheduleToken || !this.soundEnabled) return;
+      const play = () => {
+        if (token !== this.audioScheduleToken || !this.soundEnabled) return;
+        const offset = Math.max(0, config.startOffsetSeconds ?? 0);
+        if (offset > 0) {
+          try {
+            const duration = Number.isFinite(this.audio.duration) ? this.audio.duration : undefined;
+            this.audio.currentTime = duration === undefined ? offset : Math.min(offset, Math.max(0, duration - 0.05));
+          } catch { /* Some browsers allow seeking only after metadata is ready. */ }
+        }
+        const fadeInMs = Math.max(0, config.fadeInSeconds ?? 0) * 1000;
+        this.audio.volume = fadeInMs > 0 ? 0 : targetVolume;
+        void this.audio.play().then(() => {
+          if (token !== this.audioScheduleToken) { this.audio.pause(); return; }
+          this.setSoundStatus('Sound on');
+          if (fadeInMs > 0) this.fadeAudio(0, targetVolume, fadeInMs, token);
+          const stopAfterMs = Math.max(0, config.stopAfterSeconds ?? 0) * 1000;
+          if (stopAfterMs > 0) {
+            const fadeOutMs = Math.min(Math.max(0, config.fadeOutSeconds ?? 0) * 1000, stopAfterMs);
+            this.audioStopTimer = window.setTimeout(() => {
+              if (token !== this.audioScheduleToken) return;
+              const stop = () => {
+                if (token !== this.audioScheduleToken) return;
+                this.audio.pause();
+                this.audio.volume = targetVolume;
+                this.setSoundStatus('Sound on');
+              };
+              if (fadeOutMs > 0) this.fadeAudio(this.audio.volume, 0, fadeOutMs, token, stop);
+              else stop();
+            }, Math.max(0, stopAfterMs - fadeOutMs));
+          }
+        }).catch(() => this.setSoundStatus('Tap Sound to start audio'));
+      };
+      if (Math.max(0, config.startOffsetSeconds ?? 0) > 0 && this.audio.readyState === 0) {
+        this.audio.addEventListener('loadedmetadata', play, { once: true });
+        this.audio.load();
+      } else play();
+    }, delayMs);
+  }
+
   private syncSceneAudio(scene: RuntimeScene): void {
+    const token = this.cancelAudioTimers();
     const url = this.sceneAudioUrl(scene);
     this.audio.pause();
     if (!url) { this.audio.removeAttribute('src'); this.audio.load(); return; }
-    if (this.audio.src !== new URL(url, window.location.href).href) this.audio.src = url;
+    if (this.audio.src !== new URL(url, window.location.href).href) { this.audio.src = url; this.audio.load(); }
     this.audio.loop = Boolean(scene.audio?.loop);
     this.audio.volume = Math.max(0, Math.min(1, scene.audio?.volume ?? 0.7));
-    if (this.soundEnabled && scene.audio?.autoplayAfterGesture) void this.audio.play().catch(() => this.setSoundStatus('Tap Sound to start audio'));
+    if (this.soundEnabled && scene.audio?.autoplayAfterGesture) this.scheduleSceneAudio(scene, token);
   }
+
   private async startSceneAudio(manual: boolean): Promise<void> {
     const scene = this.currentScene();
     if (!scene) return;
     const url = this.sceneAudioUrl(scene);
     if (!url) { this.setSoundStatus('No audio for this scene'); return; }
-    if (this.audio.src !== new URL(url, window.location.href).href) this.audio.src = url;
+    const token = this.cancelAudioTimers();
+    this.audio.pause();
+    if (this.audio.src !== new URL(url, window.location.href).href) { this.audio.src = url; this.audio.load(); }
     this.audio.loop = Boolean(scene.audio?.loop);
     this.audio.volume = Math.max(0, Math.min(1, scene.audio?.volume ?? 0.7));
-    if (manual || scene.audio?.autoplayAfterGesture) {
-      try { await this.audio.play(); this.setSoundStatus('Sound on'); }
-      catch { this.setSoundStatus('Browser blocked audio playback'); }
-    } else {
-      this.setSoundStatus('Sound enabled');
-    }
+    if (manual || scene.audio?.autoplayAfterGesture) this.scheduleSceneAudio(scene, token);
+    else this.setSoundStatus('Sound enabled');
   }
 
   private showError(message: string): void { this.errorBox.textContent = message; this.errorBox.hidden = false; }
@@ -422,3 +519,5 @@ if (document.readyState === 'loading') document.addEventListener('DOMContentLoad
 else void boot();
 
 /* 360-STUDIO-HOTSPOTS-V0.6.1 */
+
+/* 360-STUDIO-SPATIAL-MEDIA-AUDIO-V0.7.0 */

@@ -41,6 +41,7 @@ function makeMarkers(hotspots: TourHotspot[], assets: TourAsset[], previewMode: 
     const color = safeCssColor(appearance.color);
     const hidden = mode === 'invisible';
     const imageUrl = (appearance.imageAssetId ? assetUrls.get(appearance.imageAssetId) : undefined) ?? appearance.imageUrl;
+    const mediaUrl = (hotspot.assetId ? assetUrls.get(hotspot.assetId) : undefined) ?? hotspot.url;
     const showLabel = appearance.showLabel !== false;
     const animation = appearance.animation && appearance.animation !== 'none' ? 'studio-pano-marker-' + appearance.animation : '';
     const shape = 'studio-pano-marker-' + (appearance.shape ?? 'pill');
@@ -48,7 +49,19 @@ function makeMarkers(hotspots: TourHotspot[], assets: TourAsset[], previewMode: 
     let html: string;
     let width: number;
     let height: number;
-    if (hidden && previewMode) {
+    if (hotspot.spatialMedia?.enabled && (hotspot.kind === 'image' || hotspot.kind === 'video') && mediaUrl) {
+      const mediaWidth = Math.max(96, Math.min(960, hotspot.spatialMedia?.width ?? 320));
+      const mediaHeight = Math.max(64, Math.min(720, hotspot.spatialMedia?.height ?? 180));
+      if (hotspot.kind === 'image') {
+        html = '<div class="studio-spatial-media studio-spatial-image" style="width:' + mediaWidth + 'px;height:' + mediaHeight + 'px"><img src="' + escapeHtml(mediaUrl) + '" alt="' + escapeHtml(hotspot.title) + '" /></div>';
+      } else {
+        const autoplay = hotspot.spatialMedia?.autoplay ? ' autoplay' : '';
+        const loop = hotspot.spatialMedia?.loop ? ' loop' : '';
+        const muted = (hotspot.spatialMedia?.muted ?? true) ? ' muted' : '';
+        html = '<div class="studio-spatial-media studio-spatial-video" style="width:' + mediaWidth + 'px;height:' + mediaHeight + 'px"><video src="' + escapeHtml(mediaUrl) + '" width="' + mediaWidth + '" height="' + mediaHeight + '" controls playsinline' + autoplay + loop + muted + '></video></div>';
+      }
+      width = mediaWidth; height = mediaHeight;
+    } else if (hidden && previewMode) {
       // Keep an actual marker hit-area, but draw no pixels in preview or the published tour.
       html = `<div class="studio-pano-marker-invisible-hit" style="width:${size}px;height:${size}px" aria-label="${escapeHtml(hotspot.title)}"></div>`;
       width = size; height = size;
@@ -152,7 +165,7 @@ export default function PanoramaCanvas({ scene, assets, placementMode, previewMo
     pluginRef.current.addEventListener('select-marker', ({ marker }) => {
       const id = marker.data?.hotspotId ?? marker.id;
       const hotspot = latestRef.current.hotspots.find((item) => item.id === id);
-      if (hotspot) latestRef.current.onHotspotAction(hotspot);
+      if (hotspot && !(hotspot.spatialMedia?.enabled && (hotspot.kind === 'image' || hotspot.kind === 'video'))) latestRef.current.onHotspotAction(hotspot);
     });
 
     return () => {
@@ -230,3 +243,5 @@ export default function PanoramaCanvas({ scene, assets, placementMode, previewMo
 }
 
 /* 360-STUDIO-HOTSPOTS-V0.6.1 */
+
+/* 360-STUDIO-SPATIAL-MEDIA-AUDIO-V0.7.0 */
