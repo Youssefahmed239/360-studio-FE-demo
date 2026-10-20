@@ -139,3 +139,12 @@ The build script bundles the player runtime into the static editor output. ZIP64
 - 2D hotspot image/GIF markers support roll rotation. Spatial image/video elements use a 3D HTML marker layer with yaw, pitch, and roll orientation, plus width/height settings.
 - The position and orientation values are optional schema-v1 properties; prior projects remain compatible.
 - New marker transforms are emitted into the standalone production player. Rebuild and test a fresh production ZIP after editing.
+
+## Radial depth controls (v0.9.0)
+
+- Hotspots can be moved radially relative to the panorama shell using the Depth control.
+- Positive depth means closer to the viewer; negative depth means farther away; zero means on the panorama radius.
+- The editor uses Photo Sphere Viewer CSS3D marker elements and adjusts their 3D radial position after marker construction. The standalone player mirrors the same values.
+- Depth is saved as the optional schema-v1 `TourHotspot.depth` field and is included automatically in project and production exports.
+- The depth range is clamped from -80 to +70 relative units to keep elements from reaching the camera origin.
+- Rebuild and test the standalone production ZIP after changing depth.

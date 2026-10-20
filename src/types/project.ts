@@ -57,6 +57,8 @@ export interface TourHotspot {
   appearance?: HotspotAppearance;
   /** Optional image/video surface positioned inside the 360 scene instead of opening a popup. */
   spatialMedia?: SpatialMediaSettings;
+  /** Radial depth offset from the panorama sphere. Negative = farther; positive = closer. */
+  depth?: number;
 }
 
 export interface SpatialMediaSettings {
@@ -114,3 +116,5 @@ export interface TourProject {
 /* 360-STUDIO-SPATIAL-MEDIA-AUDIO-V0.7.0 */
 
 /* 360-STUDIO-HOTSPOT-SPATIAL-TRANSFORMS-V0.8.0 */
+
+/* 360-STUDIO-SPATIAL-DEPTH-CONTROLS-V0.9.0 */

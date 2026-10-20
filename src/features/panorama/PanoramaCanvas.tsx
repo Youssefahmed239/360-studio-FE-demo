@@ -22,6 +22,7 @@ type ViewerMarker = { id: string; data?: { hotspotId?: string } };
 type MarkerPlugin = {
   setMarkers: (markers: Array<Record<string, unknown>>) => void;
   updateMarker: (marker: Record<string, unknown>) => void;
+  getMarker: (id: string) => { threeElement: { position: { x: number; y: number; z: number } } };
   addEventListener: (name: 'select-marker', callback: (event: { marker: ViewerMarker }) => void) => void;
 };
 
@@ -33,6 +34,25 @@ const escapeHtml = (value: string) => value.replace(/[&<>"']/g, (char) => ({
 
 function safeCssColor(value: string | undefined): string {
   return value && /^#[0-9a-f]{6}$/i.test(value) ? value : '#a3e635';
+}
+
+
+/** Move a CSS3D marker radially from the panorama radius (100). Positive depth moves it toward the viewer. */
+function applyMarkerDepth(plugin: MarkerPlugin, hotspots: TourHotspot[]) {
+  for (const hotspot of hotspots) {
+    const depth = Math.max(-80, Math.min(70, Number(hotspot.depth ?? 0)));
+    if (Math.abs(depth) < 0.001) continue;
+    try {
+      const position = plugin.getMarker(hotspot.id).threeElement.position;
+      const currentRadius = Math.hypot(position.x, position.y, position.z);
+      if (!Number.isFinite(currentRadius) || currentRadius < 0.001) continue;
+      const targetRadius = 100 - depth;
+      const factor = targetRadius / currentRadius;
+      position.x *= factor;
+      position.y *= factor;
+      position.z *= factor;
+    } catch { /* 2D markers at zero depth do not expose a CSS3D position. */ }
+  }
 }
 
 function makeMarkers(hotspots: TourHotspot[], assets: TourAsset[], previewMode: boolean) {
@@ -111,6 +131,20 @@ function makeMarkers(hotspots: TourHotspot[], assets: TourAsset[], previewMode: 
     } else {
       html = `<div class="studio-pano-marker studio-pano-marker-custom ${shape} ${animation}" style="--hotspot-color:${color};--hotspot-size:${size}px"><span class="studio-pano-marker-icon">${symbol}</span>${showLabel ? `<span class="studio-pano-marker-label">${escapeHtml(hotspot.title)}</span>` : ''}</div>`;
       width = showLabel ? Math.max(90, Math.min(190, hotspot.title.length * 7 + 44)) : size; height = Math.max(size, showLabel ? 34 : size);
+    }
+    if (!elementLayer && Math.abs(hotspot.depth ?? 0) > 0.001) {
+      const depthSurface = document.createElement('div');
+      depthSurface.className = 'studio-depth-hotspot';
+      depthSurface.dataset.hotspotId = hotspot.id;
+      depthSurface.style.width = width + 'px';
+      depthSurface.style.height = height + 'px';
+      depthSurface.style.background = 'transparent';
+      depthSurface.style.border = '0';
+      depthSurface.style.boxShadow = 'none';
+      depthSurface.style.overflow = 'visible';
+      depthSurface.style.pointerEvents = 'auto';
+      depthSurface.innerHTML = html;
+      elementLayer = depthSurface;
     }
     html = html.replace('<div class="studio-', '<div data-hotspot-id="' + escapeHtml(hotspot.id) + '" class="studio-');
     const spatialRotation = hotspot.spatialMedia?.enabled ? {
@@ -197,6 +231,7 @@ export default function PanoramaCanvas({ scene, assets, placementMode, previewMo
 
     viewerRef.current = viewer;
     pluginRef.current = viewer.getPlugin(MarkersPlugin) as unknown as MarkerPlugin;
+    applyMarkerDepth(pluginRef.current, scene.hotspots);
     lastPanoramaRef.current = panoramaKey(scene);
     lastSceneIdRef.current = scene.id;
 
@@ -260,6 +295,8 @@ export default function PanoramaCanvas({ scene, assets, placementMode, previewMo
         drag.yaw = point.yaw;
         drag.pitch = point.pitch;
         plugin.updateMarker({ id: drag.hotspotId, position: { yaw: point.yaw + 'deg', pitch: point.pitch + 'deg' } });
+        const activeHotspot = latestRef.current.hotspots.find((item) => item.id === drag!.hotspotId);
+        if (activeHotspot) applyMarkerDepth(plugin, [activeHotspot]);
       } catch { /* Ignore coordinates outside the active panorama projection. */ }
     };
     const finishDrag = (event: PointerEvent, commit: boolean) => {
@@ -339,6 +376,7 @@ export default function PanoramaCanvas({ scene, assets, placementMode, previewMo
     const plugin = pluginRef.current;
     if (!plugin) return;
     plugin.setMarkers(makeMarkers(scene.hotspots, assets, previewMode));
+    applyMarkerDepth(plugin, scene.hotspots);
   }, [scene.hotspots, scene.id, assets, previewMode]);
 
   return <div
@@ -353,3 +391,5 @@ export default function PanoramaCanvas({ scene, assets, placementMode, previewMo
 /* 360-STUDIO-SPATIAL-MEDIA-AUDIO-V0.7.0 */
 
 /* 360-STUDIO-HOTSPOT-SPATIAL-TRANSFORMS-V0.8.0 */
+
+/* 360-STUDIO-SPATIAL-DEPTH-CONTROLS-V0.9.0 */

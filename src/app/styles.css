@@ -87,3 +87,6 @@
 .hotspot-moving .psv-marker{cursor:grab!important;}
 .hotspot-moving .psv-marker:active{cursor:grabbing!important;}
 /* 360-STUDIO-HOTSPOT-SPATIAL-TRANSFORMS-V0.8.0 */
+
+.studio-depth-hotspot{display:block;overflow:visible;background:transparent;border:0;box-shadow:none;pointer-events:auto;user-select:none;}
+/* 360-STUDIO-SPATIAL-DEPTH-CONTROLS-V0.9.0 */
