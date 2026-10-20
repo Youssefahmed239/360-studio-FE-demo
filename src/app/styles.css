@@ -90,3 +90,11 @@
 .hotspot-scale-controls{display:grid;gap:7px;margin-top:12px;padding-top:10px;border-top:1px solid #2c3744;}
 .hotspot-scale-controls .duration-label{margin-top:4px;}
 /* 360-STUDIO-SCALE-CONTROLS-V0.9.1 */
+
+.studio-rotation-gizmo{width:120px;height:120px;display:grid;place-items:center;overflow:visible;background:transparent!important;border:0!important;border-radius:0!important;box-shadow:none!important;pointer-events:auto!important;user-select:none;touch-action:none;filter:drop-shadow(0 1px 2px #0009);}
+.studio-rotation-gizmo svg{display:block;width:120px;height:120px;overflow:visible;pointer-events:auto;}
+.studio-rotation-gizmo [data-rotate-axis]{pointer-events:stroke;cursor:grab;touch-action:none;}
+.studio-rotation-gizmo [data-rotate-axis]:hover{stroke-width:5;filter:drop-shadow(0 0 3px currentColor);}
+.studio-rotation-gizmo-button{width:100%;margin-top:8px;min-height:31px;}
+.studio-rotation-gizmo-button.active{border-color:#78a9ff;background:#1d2c45;color:#e6efff;}
+/* 360-STUDIO-UNITY-ROTATE-GIZMO-V0.10.0 */

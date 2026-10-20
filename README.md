@@ -147,3 +147,12 @@ The build script bundles the player runtime into the static editor output. ZIP64
 - Scale affects regular hotspots, image/GIF marker visuals, and spatial image/video element layers.
 - Values are optional schema-v1 fields `TourHotspot.scaleX` and `TourHotspot.scaleY`, so existing projects default to 1×.
 - The editor and standalone player use the same scale rendering. Build and test a fresh production ZIP after changing scale.
+
+## Unity-style rotation gizmo and anchored media (v0.10.0)
+
+- The editor can show red X, green Y, and blue Z rotation rings for a selected spatial image/video surface. Drag a ring to rotate that axis; rotation previews live and is committed on pointer release.
+- X maps to the surface pitch axis, Y to yaw, and Z to roll. Numeric 3D orientation fields remain available.
+- The gizmo is an editor-only overlay anchored at the selected element's spherical yaw/pitch. It is omitted from Preview and the production player.
+- Spatial image/video itself remains a Photo Sphere Viewer `elementLayer` marker at the project's saved spherical yaw/pitch. Its `rotation` is updated independently, so rotating the camera does not turn the media into a camera-facing overlay.
+- Project schema stays at version 1; the existing optional `spatialMedia.rotationYawDeg`, `rotationPitchDeg`, and `rotationRollDeg` fields serialize through project ZIP and standalone tour export.
+- Rebuild and test a new standalone tour after changes.

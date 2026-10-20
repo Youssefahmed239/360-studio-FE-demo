@@ -40,6 +40,7 @@ export default function App() {
   const [showPublish, setShowPublish] = useState(false);
   const [placingHotspot, setPlacingHotspot] = useState(false);
   const [movingHotspotId, setMovingHotspotId] = useState<string | null>(null);
+  const [rotatingHotspotId, setRotatingHotspotId] = useState<string | null>(null);
   const [previewMode, setPreviewMode] = useState(false);
   const [selectedHotspot, setSelectedHotspot] = useState<TourHotspot | null>(null);
   const [tileManifestUrl, setTileManifestUrl] = useState('');
@@ -61,7 +62,7 @@ export default function App() {
     const timer = window.setTimeout(() => setNotice(''), 3600);
     return () => window.clearTimeout(timer);
   }, [notice]);
-  useEffect(() => { setPlacingHotspot(false); setMovingHotspotId(null); }, [activeSceneId]);
+  useEffect(() => { setPlacingHotspot(false); setMovingHotspotId(null); setRotatingHotspotId(null); }, [activeSceneId]);
   useEffect(() => { setTileManifestUrl(activeScene?.tiledPanorama?.manifestUrl ?? ''); }, [activeSceneId, activeScene?.tiledPanorama?.manifestUrl]);
 
   async function addPanorama(file?: File) {
@@ -250,6 +251,22 @@ export default function App() {
     setNotice('Hotspot position saved. Keep dragging, or switch off Move in panorama when you are done.');
   }
 
+  function rotateHotspot(hotspotId: string, axis: 'x' | 'y' | 'z', degrees: number) {
+    const hotspot = activeScene?.hotspots.find((item) => item.id === hotspotId);
+    if (!hotspot || !Number.isFinite(degrees)) return;
+    const value = Math.max(-360, Math.min(360, Math.round(degrees * 100) / 100));
+    if (hotspot.spatialMedia?.enabled) {
+      const spatialMedia = { ...(hotspot.spatialMedia ?? {}), enabled: true };
+      if (axis === 'x') spatialMedia.rotationPitchDeg = value;
+      else if (axis === 'y') spatialMedia.rotationYawDeg = value;
+      else spatialMedia.rotationRollDeg = value;
+      updateHotspot(hotspotId, { spatialMedia });
+    } else if (axis === 'z') {
+      updateHotspot(hotspotId, { appearance: { ...(hotspot.appearance ?? {}), rotationDeg: value } });
+    }
+    setNotice('Rotation saved. The media stays anchored at its panorama position.');
+  }
+
   function deleteHotspot(hotspotId: string) {
     if (!activeScene) return;
     updateScene(activeScene.id, { hotspots: activeScene.hotspots.filter((hotspot) => hotspot.id !== hotspotId) });
@@ -314,9 +331,9 @@ export default function App() {
       </aside>
 
       <main className="editor-main">
-        <div className="editor-toolbar"><div className="breadcrumb">Experience <span>/</span> <strong>{activeScene?.name ?? 'No scene selected'}</strong></div><div className="toolbar-right"><span className="draft-chip"><span /> {previewMode ? 'PREVIEW' : 'DRAFT'}</span><button className={`button button-quiet small ${previewMode ? 'preview-active' : ''}`} onClick={() => { setPreviewMode((value) => !value); setPlacingHotspot(false); }}><MonitorPlay size={15} /> {previewMode ? 'Exit preview' : 'Preview'}</button></div></div>
+        <div className="editor-toolbar"><div className="breadcrumb">Experience <span>/</span> <strong>{activeScene?.name ?? 'No scene selected'}</strong></div><div className="toolbar-right"><span className="draft-chip"><span /> {previewMode ? 'PREVIEW' : 'DRAFT'}</span><button className={`button button-quiet small ${previewMode ? 'preview-active' : ''}`} onClick={() => { setPreviewMode((value) => !value); setPlacingHotspot(false); setRotatingHotspotId(null); }}><MonitorPlay size={15} /> {previewMode ? 'Exit preview' : 'Preview'}</button></div></div>
         <div className="canvas-area"><div className={`canvas-frame ${placingHotspot ? 'hotspot-placement' : ''} ${movingHotspotId && !previewMode ? 'hotspot-moving' : ''}`}>
-          {activeScene ? <PanoramaCanvas scene={activeScene} assets={project.assets} placementMode={placingHotspot && !previewMode} previewMode={previewMode} moveHotspotId={previewMode ? null : movingHotspotId} onMoveHotspot={moveHotspot} onPlaceHotspot={placeHotspot} onHotspotAction={activateHotspot} /> : null}
+          {activeScene ? <PanoramaCanvas scene={activeScene} assets={project.assets} placementMode={placingHotspot && !previewMode} previewMode={previewMode} moveHotspotId={previewMode ? null : movingHotspotId} onMoveHotspot={moveHotspot} rotateGizmoHotspotId={previewMode ? null : rotatingHotspotId} onRotateHotspot={rotateHotspot} onPlaceHotspot={placeHotspot} onHotspotAction={activateHotspot} /> : null}
           {!activeScene?.panoramaUrl && !activeScene?.tiledPanorama && <div className="empty-panorama"><div className="orbit orbit-one"/><div className="orbit orbit-two"/><div className="orbit-center"><Aperture size={38} strokeWidth={1.2} /></div><div className="empty-copy"><span className="eyebrow">SCENE CANVAS</span><h2>Your world starts here.</h2><p>Add an equirectangular panorama to explore the scene in full 360°.</p><button className="button button-primary" onClick={() => panoramaRef.current?.click()}><Plus size={16} /> Add panorama</button><div className="file-hint">JPG, PNG, WEBP · Original file retained in browser storage</div></div></div>}
           <input ref={panoramaRef} className="visually-hidden" type="file" accept="image/jpeg,image/png,image/webp" onChange={(e) => void addPanorama(e.target.files?.[0])} /><input ref={hotspotImageInputRef} className="visually-hidden" type="file" accept="image/*" onChange={(e) => void uploadHotspotImage(e.target.files?.[0])} /><input ref={spatialMediaInputRef} className="visually-hidden" type="file" accept="image/*,video/mp4,video/webm,video/ogg" onChange={(e) => void uploadSpatialMedia(e.target.files?.[0])} />
           <div className="canvas-corner top-left"><span className="live-dot" /> {previewMode ? 'TOUR PREVIEW' : placingHotspot ? 'CLICK TO PLACE HOTSPOT' : '360° EDITOR CANVAS'}</div><div className="canvas-corner top-right"><span>360°</span><span className="corner-divider" /> <span>{activeScene?.tiledPanorama ? 'TILE STREAMING' : 'SPHERICAL VIEW'}</span></div>
@@ -337,10 +354,11 @@ export default function App() {
             <div><label className="field-label" htmlFor={`hotspot-yaw-${hotspot.id}`}>Yaw (°)</label><input id={`hotspot-yaw-${hotspot.id}`} className="text-field compact" type="number" min="0" max="360" step="0.1" value={hotspot.yaw} onChange={(e) => updateHotspotPosition(hotspot.id, 'yaw', Number(e.target.value))} /></div>
             <div><label className="field-label" htmlFor={`hotspot-pitch-${hotspot.id}`}>Pitch (°)</label><input id={`hotspot-pitch-${hotspot.id}`} className="text-field compact" type="number" min="-89.9" max="89.9" step="0.1" value={hotspot.pitch} onChange={(e) => updateHotspotPosition(hotspot.id, 'pitch', Number(e.target.value))} /></div>
           </div>
-          <button className={`mini-button hotspot-move-button ${movingHotspotId === hotspot.id ? 'active' : ''}`} type="button" onClick={() => { setMovingHotspotId((current) => current === hotspot.id ? null : hotspot.id); setNotice(movingHotspotId === hotspot.id ? 'Move mode disabled.' : 'Drag this hotspot or media surface inside the panorama to reposition it.'); }}>
+          <button className={`mini-button hotspot-move-button ${movingHotspotId === hotspot.id ? 'active' : ''}`} type="button" onClick={() => { setRotatingHotspotId(null); setMovingHotspotId((current) => current === hotspot.id ? null : hotspot.id); setNotice(movingHotspotId === hotspot.id ? 'Move mode disabled.' : 'Drag this hotspot or media surface inside the panorama to reposition it.'); }}>
             {movingHotspotId === hotspot.id ? 'Done moving' : 'Move in panorama'}
           </button>
           <div className="field-help">Turn on Move in panorama, then drag this marker or media surface. The new spherical position is saved when you release it.</div>
+          {hotspot.spatialMedia?.enabled && (hotspot.kind === 'image' || hotspot.kind === 'video') && <button className={"mini-button hotspot-rotate-gizmo-button " + (rotatingHotspotId === hotspot.id ? "active" : "")} type="button" onClick={() => { setMovingHotspotId(null); setRotatingHotspotId((current) => current === hotspot.id ? null : hotspot.id); setNotice(rotatingHotspotId === hotspot.id ? 'Rotate gizmo disabled.' : 'Drag the red, green or blue ring to rotate the media around X, Y or Z.'); }}>{rotatingHotspotId === hotspot.id ? 'Done rotating' : 'Rotate with Unity gizmo'}</button>}
           <div className="hotspot-scale-controls">
             <label className="field-label duration-label" htmlFor={`hotspot-scale-x-${hotspot.id}`}>Scale X <strong>{(hotspot.scaleX ?? 1).toFixed(2)}×</strong></label>
             <input id={`hotspot-scale-x-${hotspot.id}`} className="range-input" type="range" min="0.1" max="4" step="0.05" value={hotspot.scaleX ?? 1} onChange={(e) => updateHotspot(hotspot.id, { scaleX: Number(e.target.value) })} />
@@ -366,7 +384,7 @@ export default function App() {
     {notice && <div className="toast" role="status"><span className="toast-icon"><Check size={15} /></span>{notice}<button aria-label="Dismiss notification" onClick={() => setNotice('')}><X size={14} /></button></div>}
     {selectedHotspot && <div className="modal-backdrop" onClick={() => setSelectedHotspot(null)}><div className={`hotspot-modal ${selectedHotspot.kind === 'page' ? 'hotspot-page-modal' : ''}`} onClick={(e) => e.stopPropagation()}><button className="modal-close" onClick={() => setSelectedHotspot(null)} aria-label="Close hotspot"><X size={17} /></button><div className="eyebrow">{selectedHotspot.kind.toUpperCase()} HOTSPOT</div><h2>{selectedHotspot.title}</h2>{selectedHotspot.kind === 'image' && selectedMediaUrl && <img className="hotspot-media-image" src={selectedMediaUrl} alt={selectedHotspot.title} />}{selectedHotspot.kind === 'video' && selectedMediaUrl && <video className="hotspot-media-video" src={selectedMediaUrl} controls playsInline />}{selectedHotspot.kind === 'audio' && selectedMediaUrl && <audio className="hotspot-media-audio" src={selectedMediaUrl} controls />}{selectedHotspot.kind === 'page' && selectedPageUrl && <iframe className="hotspot-media-page" src={selectedPageUrl} title={selectedHotspot.title} loading="lazy" referrerPolicy="strict-origin-when-cross-origin" allow="fullscreen; autoplay" />}{selectedHotspot.kind === 'page' && !selectedPageUrl && <p className="hotspot-modal-copy">Add a valid HTTP(S) page URL. Some websites block embedded viewing; use the new-tab option if that happens.</p>}{selectedHotspot.kind === 'info' && <p className="hotspot-modal-copy">This information hotspot is ready to be expanded with rich text and branded content in a later phase.</p>}{['image', 'video', 'audio'].includes(selectedHotspot.kind) && !selectedMediaUrl && <p className="hotspot-modal-copy">Add a direct media URL in the Inspector to preview this hotspot. Uploaded asset linking will follow in the Media Library phase.</p>}{selectedExternalUrl && <a className="hotspot-external-link" href={selectedExternalUrl} target="_blank" rel="noopener noreferrer"><ExternalLink size={14} /> {selectedHotspot.kind === 'page' ? 'Open page in new tab' : 'Open source in new tab'}</a>}</div></div>}
     {showPublish && <div className="modal-backdrop" onClick={() => setShowPublish(false)}><div className="publish-modal" onClick={(e) => e.stopPropagation()}><div className="modal-icon"><Globe2 size={22} /></div><button className="modal-close" onClick={() => setShowPublish(false)} aria-label="Close"><X size={17} /></button><div className="eyebrow">PRODUCTION WORKFLOW</div><h2>Build for the web</h2><p>Build a standalone tour bundle with its own viewer runtime, project configuration, panoramas, hotspots, and included media. Extract the ZIP into an Nginx directory and share that URL; visitors will not see the Studio editor.</p><div className="build-checklist"><span><Check size={15} /> Save / resume draft with local media</span><span><Check size={15} /> Export / import project configuration</span><span><Check size={15} /> Interactive 360° viewer and scene navigation</span><span><Check size={15} /> Multi-resolution tile manifest + viewer support</span><span><Check size={15} /> Standalone player runtime + Nginx deployment ZIP</span></div><button className="button button-primary full-width" onClick={() => void handleBuildProductionTour()} disabled={buildingProduction}>{buildingProduction ? productionStatus : 'Build standalone tour (.zip)'}</button></div></div>}
-    <footer className="bottom-status"><span><span className={`status-dot ${saveState}`} /> Workspace ready</span><span>360 Studio Demo <span className="footer-divider">/</span> v0.9.1</span><span>Project schema v1</span></footer>
+    <footer className="bottom-status"><span><span className={`status-dot ${saveState}`} /> Workspace ready</span><span>360 Studio Demo <span className="footer-divider">/</span> v0.10.0</span><span>Project schema v1</span></footer>
   </div>;
 }
 
@@ -377,3 +395,5 @@ export default function App() {
 /* 360-STUDIO-HOTSPOT-SPATIAL-TRANSFORMS-V0.8.0 */
 
 /* 360-STUDIO-SCALE-CONTROLS-V0.9.1 */
+
+/* 360-STUDIO-UNITY-ROTATE-GIZMO-V0.10.0 */

@@ -14,6 +14,8 @@ type Props = {
   previewMode: boolean;
   moveHotspotId: string | null;
   onMoveHotspot: (hotspotId: string, yaw: number, pitch: number) => void;
+  rotateGizmoHotspotId: string | null;
+  onRotateHotspot: (hotspotId: string, axis: 'x' | 'y' | 'z', degrees: number) => void;
   onPlaceHotspot: (yaw: number, pitch: number) => void;
   onHotspotAction: (hotspot: TourHotspot) => void;
 };
@@ -140,6 +142,53 @@ function makeMarkers(hotspots: TourHotspot[], assets: TourAsset[], previewMode: 
   });
 }
 
+type RotationAxis = 'x' | 'y' | 'z';
+
+function rotationAngle(hotspot: TourHotspot, axis: RotationAxis): number {
+  if (hotspot.spatialMedia?.enabled) {
+    if (axis === 'x') return hotspot.spatialMedia.rotationPitchDeg ?? 0;
+    if (axis === 'y') return hotspot.spatialMedia.rotationYawDeg ?? 0;
+    return hotspot.spatialMedia.rotationRollDeg ?? 0;
+  }
+  return axis === 'z' ? hotspot.appearance?.rotationDeg ?? 0 : 0;
+}
+
+function rotationFor(hotspot: TourHotspot, axis: RotationAxis, degrees: number): Record<string, string> {
+  if (!hotspot.spatialMedia?.enabled) return { roll: degrees.toFixed(2) + 'deg' };
+  const yaw = axis === 'y' ? degrees : hotspot.spatialMedia.rotationYawDeg ?? 0;
+  const pitch = axis === 'x' ? degrees : hotspot.spatialMedia.rotationPitchDeg ?? 0;
+  const roll = axis === 'z' ? degrees : hotspot.spatialMedia.rotationRollDeg ?? 0;
+  return { yaw: yaw + 'deg', pitch: pitch + 'deg', roll: roll + 'deg' };
+}
+
+function withRotationGizmo(
+  markers: Array<Record<string, unknown>>,
+  hotspots: TourHotspot[],
+  activeId: string | null,
+): Array<Record<string, unknown>> {
+  if (!activeId) return markers;
+  const hotspot = hotspots.find((item) => item.id === activeId && (item.kind === 'image' || item.kind === 'video') && item.spatialMedia?.enabled);
+  if (!hotspot) return markers;
+  const id = escapeHtml(hotspot.id);
+  const html = '<div class="studio-rotation-gizmo" data-rotation-gizmo-for="' + id + '" aria-label="Unity style rotation gizmo">' +
+    '<svg viewBox="0 0 120 120" width="120" height="120" role="group" aria-label="Rotate media around X, Y and Z">' +
+    '<ellipse data-rotate-axis="x" cx="60" cy="60" rx="47" ry="24" transform="rotate(-42 60 60)" fill="none" stroke="#ff5252" stroke-width="3.2" pointer-events="stroke" />' +
+    '<ellipse data-rotate-axis="y" cx="60" cy="60" rx="24" ry="47" transform="rotate(42 60 60)" fill="none" stroke="#5ee681" stroke-width="3.2" pointer-events="stroke" />' +
+    '<circle data-rotate-axis="z" cx="60" cy="60" r="35" fill="none" stroke="#5795ff" stroke-width="3.2" pointer-events="stroke" />' +
+    '<circle cx="60" cy="60" r="4" fill="#f7fafc" stroke="#17202b" stroke-width="1.5" pointer-events="none" />' +
+    '</svg></div>';
+  return [...markers, {
+    id: '__rotation_gizmo__' + hotspot.id,
+    html,
+    anchor: 'center center',
+    size: { width: 120, height: 120 },
+    position: { yaw: hotspot.yaw + 'deg', pitch: hotspot.pitch + 'deg' },
+    zIndex: 10000,
+    tooltip: { content: 'Rotate selected media', position: 'top' },
+    data: { rotationGizmo: true },
+  }];
+}
+
 function panoramaKey(scene: TourScene): string | null {
   if (scene.tiledPanorama) return `tiles:${JSON.stringify(scene.tiledPanorama)}`;
   return scene.panoramaUrl ?? null;
@@ -171,15 +220,15 @@ function panoramaInput(scene: TourScene, assetUrls: Map<string, string>): string
   return scene.tiledPanorama ? makeTiledPanorama(scene.tiledPanorama, assetUrls) : scene.panoramaUrl!;
 }
 
-export default function PanoramaCanvas({ scene, assets, placementMode, previewMode, moveHotspotId, onMoveHotspot, onPlaceHotspot, onHotspotAction }: Props) {
+export default function PanoramaCanvas({ scene, assets, placementMode, previewMode, moveHotspotId, onMoveHotspot, rotateGizmoHotspotId, onRotateHotspot, onPlaceHotspot, onHotspotAction }: Props) {
   const hostRef = useRef<HTMLDivElement>(null);
   const viewerRef = useRef<Viewer | null>(null);
   const pluginRef = useRef<MarkerPlugin | null>(null);
   const lastPanoramaRef = useRef<string | null>(null);
   const lastSceneIdRef = useRef<string | null>(null);
   const transitionSequenceRef = useRef(0);
-  const latestRef = useRef({ placementMode, moveHotspotId, onMoveHotspot, onPlaceHotspot, onHotspotAction, hotspots: scene.hotspots });
-  latestRef.current = { placementMode, moveHotspotId, onMoveHotspot, onPlaceHotspot, onHotspotAction, hotspots: scene.hotspots };
+  const latestRef = useRef({ placementMode, moveHotspotId, onMoveHotspot, rotateGizmoHotspotId, onRotateHotspot, onPlaceHotspot, onHotspotAction, hotspots: scene.hotspots });
+  latestRef.current = { placementMode, moveHotspotId, onMoveHotspot, rotateGizmoHotspotId, onRotateHotspot, onPlaceHotspot, onHotspotAction, hotspots: scene.hotspots };
   const assetUrls = new Map<string, string>();
   for (const asset of assets) if (asset.url) assetUrls.set(asset.id, asset.url);
 
@@ -218,6 +267,7 @@ export default function PanoramaCanvas({ scene, assets, placementMode, previewMo
     });
 
     pluginRef.current.addEventListener('select-marker', ({ marker }) => {
+      if (marker.id.startsWith('__rotation_gizmo__')) return;
       const id = marker.data?.hotspotId ?? marker.id;
       const hotspot = latestRef.current.hotspots.find((item) => item.id === id);
       if (hotspot && !(hotspot.spatialMedia?.enabled && (hotspot.kind === 'image' || hotspot.kind === 'video'))) latestRef.current.onHotspotAction(hotspot);
@@ -300,6 +350,87 @@ export default function PanoramaCanvas({ scene, assets, placementMode, previewMo
   }, [hasPanorama, adapterMode, assets, moveHotspotId]);
 
   useEffect(() => {
+    const host = hostRef.current;
+    const plugin = pluginRef.current;
+    if (!host || !plugin || !rotateGizmoHotspotId) return;
+    type RotationDrag = {
+      hotspotId: string;
+      axis: RotationAxis;
+      pointerId: number;
+      gizmo: HTMLElement;
+      startAngle: number;
+      startValue: number;
+      currentValue: number;
+    };
+    let drag: RotationDrag | null = null;
+    const angleAt = (event: PointerEvent, gizmo: HTMLElement) => {
+      const rect = gizmo.getBoundingClientRect();
+      return Math.atan2(event.clientY - (rect.top + rect.height / 2), event.clientX - (rect.left + rect.width / 2)) * 180 / Math.PI;
+    };
+    const wrappedDelta = (value: number) => ((value + 540) % 360) - 180;
+    const clampAngle = (value: number) => Math.max(-360, Math.min(360, value));
+    const onPointerDown = (event: PointerEvent) => {
+      if (event.button !== 0 || !(event.target instanceof Element)) return;
+      const axisElement = event.target.closest('[data-rotate-axis]');
+      const gizmo = event.target.closest<HTMLElement>('[data-rotation-gizmo-for]');
+      const axisValue = axisElement?.getAttribute('data-rotate-axis');
+      const hotspotId = gizmo?.dataset.rotationGizmoFor;
+      if (!gizmo || !hotspotId || (axisValue !== 'x' && axisValue !== 'y' && axisValue !== 'z')) return;
+      const hotspot = latestRef.current.hotspots.find((item) => item.id === hotspotId);
+      if (!hotspot || hotspotId !== latestRef.current.rotateGizmoHotspotId || latestRef.current.moveHotspotId === hotspotId) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      const axis = axisValue as RotationAxis;
+      const value = rotationAngle(hotspot, axis);
+      drag = { hotspotId, axis, pointerId: event.pointerId, gizmo, startAngle: angleAt(event, gizmo), startValue: value, currentValue: value };
+      try { host.setPointerCapture(event.pointerId); } catch { /* Pointer capture is optional. */ }
+    };
+    const onPointerMove = (event: PointerEvent) => {
+      if (!drag || drag.pointerId !== event.pointerId) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      const delta = wrappedDelta(angleAt(event, drag.gizmo) - drag.startAngle);
+      drag.currentValue = clampAngle(drag.startValue + delta);
+      const hotspot = latestRef.current.hotspots.find((item) => item.id === drag!.hotspotId);
+      if (!hotspot) return;
+      plugin.updateMarker({ id: drag.hotspotId, rotation: rotationFor(hotspot, drag.axis, drag.currentValue) });
+    };
+    const finish = (event: PointerEvent, commit: boolean) => {
+      if (!drag || drag.pointerId !== event.pointerId) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      const ended = drag;
+      drag = null;
+      try { if (host.hasPointerCapture(event.pointerId)) host.releasePointerCapture(event.pointerId); } catch { /* Pointer capture is optional. */ }
+      if (!commit) {
+        const hotspot = latestRef.current.hotspots.find((item) => item.id === ended.hotspotId);
+        if (hotspot) plugin.updateMarker({ id: ended.hotspotId, rotation: rotationFor(hotspot, ended.axis, ended.startValue) });
+      } else if (Math.abs(ended.currentValue - ended.startValue) > 0.01) {
+        latestRef.current.onRotateHotspot(ended.hotspotId, ended.axis, ended.currentValue);
+      }
+    };
+    const onPointerUp = (event: PointerEvent) => finish(event, true);
+    const onPointerCancel = (event: PointerEvent) => finish(event, false);
+    const onClick = (event: MouseEvent) => {
+      if (!(event.target instanceof Element) || !event.target.closest('[data-rotate-axis]')) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+    };
+    host.addEventListener('pointerdown', onPointerDown, true);
+    host.addEventListener('pointermove', onPointerMove, true);
+    host.addEventListener('pointerup', onPointerUp, true);
+    host.addEventListener('pointercancel', onPointerCancel, true);
+    host.addEventListener('click', onClick, true);
+    return () => {
+      host.removeEventListener('pointerdown', onPointerDown, true);
+      host.removeEventListener('pointermove', onPointerMove, true);
+      host.removeEventListener('pointerup', onPointerUp, true);
+      host.removeEventListener('pointercancel', onPointerCancel, true);
+      host.removeEventListener('click', onClick, true);
+    };
+  }, [hasPanorama, adapterMode, assets, rotateGizmoHotspotId]);
+
+  useEffect(() => {
     const viewer = viewerRef.current;
     if (!viewer || (!scene.tiledPanorama && !scene.panoramaUrl)) return;
 
@@ -350,8 +481,8 @@ export default function PanoramaCanvas({ scene, assets, placementMode, previewMo
   useEffect(() => {
     const plugin = pluginRef.current;
     if (!plugin) return;
-    plugin.setMarkers(makeMarkers(scene.hotspots, assets, previewMode));
-  }, [scene.hotspots, scene.id, assets, previewMode]);
+    plugin.setMarkers(withRotationGizmo(makeMarkers(scene.hotspots, assets, previewMode), scene.hotspots, rotateGizmoHotspotId));
+  }, [scene.hotspots, scene.id, assets, previewMode, rotateGizmoHotspotId]);
 
   return <div
     ref={hostRef}
@@ -367,3 +498,5 @@ export default function PanoramaCanvas({ scene, assets, placementMode, previewMo
 /* 360-STUDIO-HOTSPOT-SPATIAL-TRANSFORMS-V0.8.0 */
 
 /* 360-STUDIO-SCALE-CONTROLS-V0.9.1 */
+
+/* 360-STUDIO-UNITY-ROTATE-GIZMO-V0.10.0 */
