@@ -1,12 +1,14 @@
 import { useEffect, useRef, useState } from 'react';
-import type { CSSProperties, PointerEvent as ReactPointerEvent } from 'react';
-import { Aperture, ArrowDownToLine, AudioLines, Check, ChevronDown, CircleHelp, Cloud, ExternalLink, FolderOpen, Globe2, Image, Layers3, LayoutDashboard, MonitorPlay, MoreHorizontal, Plus, Save, Settings2, Sparkles, Trash2, Video, X } from 'lucide-react';
+import type { CSSProperties, DragEvent as ReactDragEvent, PointerEvent as ReactPointerEvent } from 'react';
+import { Aperture, ArrowDownToLine, AudioLines, Check, ChevronDown, CircleHelp, Cloud, ExternalLink, FolderOpen, Globe2, Image, Layers3, LayoutDashboard, MonitorPlay, Plus, Save, Settings2, Sparkles, Trash2, Video, X } from 'lucide-react';
 import { useProjectStore } from '../features/projects/projectStore';
-import { persistUploadedAsset, restoreUploadedAssetUrls } from '../features/assets/assetStorage';
+import { deleteUploadedAssets, persistUploadedAsset, restoreUploadedAssetUrls } from '../features/assets/assetStorage';
 import PanoramaCanvas from '../features/panorama/PanoramaCanvas';
 import { loadTiledPanoramaManifest } from '../features/panorama/panoramaManifest';
 import { exportProjectArchive, importProjectFile } from '../lib/portableProjectArchive';
 import { exportProductionTourBundle } from '../lib/productionTourBundle';
+import { deleteSceneFromProject, reorderById } from '../lib/sceneEditing.mjs';
+import type { DeleteSceneResult } from '../lib/sceneEditing.mjs';
 import type { HotspotKind, TourHotspot, TourLayoutSettings, TourScene, TourUiAction, TourUiElement, TourUiElementKind } from '../types/project';
 
 const statusText = { saved: 'All changes saved', unsaved: 'Unsaved changes', saving: 'Saving…', error: 'Save failed' } as const;
@@ -78,6 +80,10 @@ export default function App() {
   const layoutImageTargetRef = useRef<{ area: 'toolbar' | 'welcome'; elementId: string } | null>(null);
   const layoutPreviewRef = useRef<HTMLDivElement>(null);
   const layoutDragRef = useRef<{ area: 'toolbar' | 'welcome'; elementId: string; startX: number; startY: number; originX: number; originY: number; grouped: boolean } | null>(null);
+  const sceneDragRef = useRef<string | null>(null);
+  const layoutOrderDragRef = useRef<{ area: 'toolbar' | 'welcome'; elementId: string } | null>(null);
+  const [sceneDropTargetId, setSceneDropTargetId] = useState<string | null>(null);
+  const [layoutOrderDropTargetId, setLayoutOrderDropTargetId] = useState<string | null>(null);
   const [notice, setNotice] = useState('');
   const [showPublish, setShowPublish] = useState(false);
   const [showThemePanel, setShowThemePanel] = useState(false);
@@ -173,13 +179,114 @@ export default function App() {
     if (spatialMediaInputRef.current) spatialMediaInputRef.current.value = '';
   }
 
+  function beginSceneDrag(sceneId: string, event: ReactDragEvent<HTMLElement>) {
+    if (project.scenes.length <= 1) { event.preventDefault(); return; }
+    sceneDragRef.current = sceneId;
+    event.dataTransfer.effectAllowed = 'move';
+    event.dataTransfer.setData('text/plain', sceneId);
+  }
+
+  function markSceneDropTarget(sceneId: string, event: ReactDragEvent<HTMLElement>) {
+    event.preventDefault();
+    if (sceneDragRef.current && sceneDragRef.current !== sceneId) setSceneDropTargetId(sceneId);
+    event.dataTransfer.dropEffect = 'move';
+  }
+
+  function dropSceneOn(sceneId: string, event: ReactDragEvent<HTMLElement>, axis: 'x' | 'y') {
+    event.preventDefault();
+    const sourceId = sceneDragRef.current || event.dataTransfer.getData('text/plain');
+    sceneDragRef.current = null;
+    setSceneDropTargetId(null);
+    if (!sourceId || sourceId === sceneId) return;
+    const rect = event.currentTarget.getBoundingClientRect();
+    const coordinate = axis === 'x' ? event.clientX : event.clientY;
+    const midpoint = axis === 'x' ? rect.left + rect.width / 2 : rect.top + rect.height / 2;
+    const afterTarget = coordinate > midpoint;
+    const current = useProjectStore.getState().project;
+    const scenes = reorderById(current.scenes, sourceId, sceneId, afterTarget);
+    if (scenes.every((scene, index) => scene.id === current.scenes[index]?.id)) return;
+    updateProject({ ...current, scenes });
+    setNotice('Scene order updated. Previous/Next navigation follows this new order.');
+  }
+
+  function endSceneDrag() {
+    sceneDragRef.current = null;
+    setSceneDropTargetId(null);
+  }
+
+  async function deleteScene(sceneId: string) {
+    const current = useProjectStore.getState().project;
+    const scene = current.scenes.find((item) => item.id === sceneId);
+    if (!scene) { setNotice('This scene no longer exists.'); return; }
+    if (current.scenes.length <= 1) { setNotice('A project must keep at least one scene. Add another scene before deleting this one.'); return; }
+    if (!window.confirm(`Delete scene “${scene.name}”? Its panorama, scene audio, hotspots, spatial media, and other scene-specific data will be removed. Media shared by another scene or layout will be kept. This cannot be undone except by reopening a saved backup.`)) return;
+
+    let result: DeleteSceneResult;
+    try { result = deleteSceneFromProject(current, sceneId); }
+    catch (error) { setNotice(error instanceof Error ? error.message : 'Could not delete this scene.'); return; }
+
+    updateProject(result.project);
+    const nextActiveSceneId = activeSceneId === sceneId || !result.project.scenes.some((item) => item.id === activeSceneId)
+      ? result.nextActiveSceneId
+      : activeSceneId;
+    selectScene(nextActiveSceneId);
+    setSelectedHotspot((currentHotspot) => currentHotspot && result.removedScene.hotspots.some((item) => item.id === currentHotspot.id) ? null : currentHotspot);
+    setPlacingHotspot(false);
+    setMovingHotspotId(null);
+    setRotatingHotspotId(null);
+    const removedMediaCount = result.orphanedAssetIds.length;
+    setNotice(`Deleted “${scene.name}” and its scene content. Removed ${result.removedNavigationHotspots} navigation link(s) pointing to it${removedMediaCount ? ` and ${removedMediaCount} unused media asset(s)` : ''}.`);
+
+    for (const asset of current.assets) {
+      if (result.orphanedAssetIds.includes(asset.id) && asset.url?.startsWith('blob:')) URL.revokeObjectURL(asset.url);
+    }
+    if (result.orphanedUploadedAssetIds.length) {
+      void deleteUploadedAssets(result.orphanedUploadedAssetIds).catch(() => {
+        setNotice(`Scene deleted, but browser media cleanup failed for ${result.orphanedUploadedAssetIds.length} unused upload(s). The project no longer references them; you may need to clear browser storage later.`);
+      });
+    }
+  }
+
+  function beginLayoutOrderDrag(area: 'toolbar' | 'welcome', elementId: string, event: ReactDragEvent<HTMLButtonElement>) {
+    layoutOrderDragRef.current = { area, elementId };
+    setSelectedLayoutElementId(elementId);
+    setLayoutOrderDropTargetId(null);
+    event.dataTransfer.effectAllowed = 'move';
+    event.dataTransfer.setData('text/plain', elementId);
+  }
+
+  function markLayoutOrderDropTarget(elementId: string, event: ReactDragEvent<HTMLButtonElement>) {
+    event.preventDefault();
+    if (layoutOrderDragRef.current?.elementId !== elementId) setLayoutOrderDropTargetId(elementId);
+    event.dataTransfer.dropEffect = 'move';
+  }
+
+  function dropLayoutElementOn(area: 'toolbar' | 'welcome', elementId: string, event: ReactDragEvent<HTMLButtonElement>) {
+    event.preventDefault();
+    const drag = layoutOrderDragRef.current;
+    const sourceId = drag?.elementId || event.dataTransfer.getData('text/plain');
+    layoutOrderDragRef.current = null;
+    setLayoutOrderDropTargetId(null);
+    if (!drag || drag.area !== area || !sourceId || sourceId === elementId) return;
+    const rect = event.currentTarget.getBoundingClientRect();
+    const afterTarget = event.clientY > rect.top + rect.height / 2;
+    const elements = reorderById(tourLayout[area].elements, sourceId, elementId, afterTarget);
+    updateLayoutArea(area, { elements } as Partial<TourLayoutSettings['toolbar']> & Partial<TourLayoutSettings['welcome']>);
+    setSelectedLayoutElementId(sourceId);
+  }
+
+  function endLayoutOrderDrag() {
+    layoutOrderDragRef.current = null;
+    setLayoutOrderDropTargetId(null);
+  }
+
   function saveTourLayout(nextLayout: TourLayoutSettings) {
     const current = useProjectStore.getState().project;
     updateProject({ ...current, layout: nextLayout });
   }
 
   function updateLayoutElement(area: 'toolbar' | 'welcome', elementId: string, patch: Partial<TourUiElement>) {
-    const updatedElements = tourLayout[area].elements.map((element) => element.id === elementId ? { ...element, ...patch } : element);
+    const updatedElements = tourLayout[area].elements.map((element) => (element.id === elementId ? { ...element, ...patch } : element));
     if (area === 'toolbar') {
       saveTourLayout({ ...tourLayout, toolbar: { ...tourLayout.toolbar, elements: updatedElements } });
     } else {
@@ -492,10 +599,13 @@ export default function App() {
 
       <aside className="scene-panel">
         <div className="panel-title-row"><div><div className="eyebrow">YOUR EXPERIENCE</div><h2>Scenes <span className="count-pill">{project.scenes.length}</span></h2></div><button className="icon-button" aria-label="Add scene" onClick={addScene}><Plus size={18} /></button></div>
-        <div className="scene-list">{project.scenes.map((scene, index) => <button key={scene.id} className={`scene-card ${scene.id === activeSceneId ? 'selected' : ''}`} onClick={() => selectScene(scene.id)}>
-          <div className={`scene-thumb thumb-${index % 3}`}>{(scene.tiledPanorama?.baseUrl ?? scene.panoramaUrl) ? <img src={(scene.tiledPanorama?.baseUrl ?? scene.panoramaUrl)!} alt="" /> : <><div className="thumb-sun" /><div className="thumb-horizon" /><div className="thumb-shape shape-a" /><div className="thumb-shape shape-b" /><div className="thumb-floor" /></>}<span className="scene-index">{String(index + 1).padStart(2, '0')}</span></div>
-          <div className="scene-card-meta"><strong>{scene.name}</strong><span>{scene.hotspots.length} hotspots <span className="meta-dot">·</span> {scene.tiledPanorama ? 'High-res tiles' : scene.panoramaUrl ? 'Panorama loaded' : 'No panorama yet'}</span></div><MoreHorizontal size={17} className="scene-more" />
-        </button>)}</div>
+        <div className="scene-list">{project.scenes.map((scene, index) => <div key={scene.id} draggable={project.scenes.length > 1} className={`scene-card ${scene.id === activeSceneId ? 'selected' : ''} ${sceneDropTargetId === scene.id ? 'scene-drop-target' : ''}`} onDragStart={(event) => beginSceneDrag(scene.id, event)} onDragOver={(event) => markSceneDropTarget(scene.id, event)} onDrop={(event) => dropSceneOn(scene.id, event, window.matchMedia('(max-width: 700px)').matches ? 'x' : 'y')} onDragEnd={endSceneDrag}>
+          <button type="button" className="scene-card-select" onClick={() => selectScene(scene.id)} aria-label={`Select scene ${scene.name}`}>
+            <div className={`scene-thumb thumb-${index % 3}`}>{(scene.tiledPanorama?.baseUrl ?? scene.panoramaUrl) ? <img draggable={false} src={(scene.tiledPanorama?.baseUrl ?? scene.panoramaUrl)!} alt="" /> : <><div className="thumb-sun" /><div className="thumb-horizon" /><div className="thumb-shape shape-a" /><div className="thumb-shape shape-b" /><div className="thumb-floor" /></>}<span className="scene-index">{String(index + 1).padStart(2, '0')}</span></div>
+            <div className="scene-card-meta"><strong>{scene.name}</strong><span>{scene.hotspots.length} hotspots <span className="meta-dot">·</span> {scene.tiledPanorama ? 'High-res tiles' : scene.panoramaUrl ? 'Panorama loaded' : 'No panorama yet'}</span></div>
+          </button>
+          <button type="button" className="scene-card-delete" title={project.scenes.length <= 1 ? 'A project must keep one scene' : `Delete scene ${scene.name}`} aria-label={`Delete scene ${scene.name}`} disabled={project.scenes.length <= 1} onClick={() => void deleteScene(scene.id)}><Trash2 size={14} /></button>
+        </div>)}</div>
         <button className="add-scene-button" onClick={addScene}><Plus size={16} /> Add new scene</button>
         <div className="storage-card"><div className="storage-icon"><Cloud size={17} /></div><div><strong>Local draft</strong><p>Config + uploaded files autosave here</p><span className="storage-meter"><i /></span></div></div>
       </aside>
@@ -509,7 +619,7 @@ export default function App() {
           <div className="canvas-corner top-left"><span className="live-dot" /> {previewMode ? 'TOUR PREVIEW' : placingHotspot ? 'CLICK TO PLACE HOTSPOT' : '360° EDITOR CANVAS'}</div><div className="canvas-corner top-right"><span>360°</span><span className="corner-divider" /> <span>{activeScene?.tiledPanorama ? 'TILE STREAMING' : 'SPHERICAL VIEW'}</span></div>
           <div className="canvas-bottom-tools"><button className={placingHotspot ? 'tool-active' : ''} disabled={(!activeScene?.panoramaUrl && !activeScene?.tiledPanorama) || previewMode} onClick={() => { if (!activeScene?.panoramaUrl && !activeScene?.tiledPanorama) { setNotice('Upload a panorama or connect a tile manifest first.'); return; } setPlacingHotspot((value) => !value); }}><Plus size={14} /> {placingHotspot ? 'Cancel placement' : 'Add hotspot'}</button><span className="tool-divider"/><button onClick={() => setNotice('Drag to look around. Use the mouse wheel or trackpad to zoom. The saved camera starting position is configured in the Inspector phase.') }><Aperture size={14} /> Camera</button><span className="tool-divider"/><button onClick={() => { setNotice('Choose a hotspot type in the Inspector after placing it. Image, video and audio viewers use direct URLs or assets linked in the project.'); setPlacingHotspot(false); }}><Video size={14} /> Place media</button></div>
         </div><div className="canvas-caption"><span><span className="keycap">Drag</span> look around <span className="caption-divider" /> Scroll to zoom <span className="caption-divider" /> {placingHotspot ? 'Click anywhere to place a hotspot' : 'Click a hotspot to interact'}</span><span>{previewMode ? 'TOUR PREVIEW' : 'EDITOR PREVIEW'} <span className="preview-dot" /></span></div></div>
-        <div className="timeline"><div className="timeline-heading"><div><span className="eyebrow">EXPERIENCE FLOW</span><h3>Scene sequence</h3></div><button className="button button-quiet small" onClick={addScene}><Plus size={15} /> Add scene</button></div><div className="timeline-track">{project.scenes.map((scene, index) => <div className={`timeline-node ${scene.id === activeSceneId ? 'active' : ''}`} key={scene.id} onClick={() => selectScene(scene.id)} role="button" tabIndex={0} onKeyDown={(e) => { if (e.key === 'Enter') selectScene(scene.id); }}><div className="timeline-thumb">{(scene.tiledPanorama?.baseUrl ?? scene.panoramaUrl) ? <img src={(scene.tiledPanorama?.baseUrl ?? scene.panoramaUrl)!} alt="" /> : <Aperture size={19} />}</div><div className="timeline-label"><span>{String(index + 1).padStart(2, '0')}</span><strong>{scene.name}</strong></div>{index < project.scenes.length - 1 && <div className="flow-connector"><span /></div>}</div>)}</div></div>
+        <div className="timeline"><div className="timeline-heading"><div><span className="eyebrow">EXPERIENCE FLOW</span><h3>Scene sequence</h3></div><button className="button button-quiet small" onClick={addScene}><Plus size={15} /> Add scene</button></div><div className="timeline-track">{project.scenes.map((scene, index) => <div className={`timeline-node ${scene.id === activeSceneId ? 'active' : ''} ${sceneDropTargetId === scene.id ? 'drop-target' : ''}`} key={scene.id} draggable={project.scenes.length > 1} onDragStart={(event) => beginSceneDrag(scene.id, event)} onDragOver={(event) => markSceneDropTarget(scene.id, event)} onDrop={(event) => dropSceneOn(scene.id, event, 'x')} onDragEnd={endSceneDrag} onClick={() => selectScene(scene.id)} role="button" tabIndex={0} onKeyDown={(e) => { if (e.key === 'Enter') selectScene(scene.id); }}><div className="timeline-thumb">{(scene.tiledPanorama?.baseUrl ?? scene.panoramaUrl) ? <img src={(scene.tiledPanorama?.baseUrl ?? scene.panoramaUrl)!} alt="" /> : <Aperture size={19} />}</div><div className="timeline-label"><span>{String(index + 1).padStart(2, '0')}</span><strong>{scene.name}</strong></div>{index < project.scenes.length - 1 && <div className="flow-connector"><span /></div>}</div>)}</div></div>
       </main>
 
       <aside className="inspector"><div className="inspector-heading"><div><div className="eyebrow">SCENE CONFIGURATION</div><h2>Inspector</h2></div><button className="icon-button" aria-label="Inspector help" onClick={() => setNotice('Configure this scene and its hotspots here. Changes autosave in this browser.')}><X size={17} /></button></div>
@@ -585,7 +695,11 @@ export default function App() {
                 <div><label className="field-label" htmlFor="welcome-backdrop-opacity">Overlay opacity <strong>{Math.round(tourLayout.welcome.backdropOpacity * 100)}%</strong></label><input id="welcome-backdrop-opacity" className="range-input" type="range" min="0" max="0.9" step="0.05" value={tourLayout.welcome.backdropOpacity} onChange={(event) => updateLayoutArea('welcome', { backdropOpacity: Number(event.target.value) })} /></div>
               </div>
               <div className="layout-welcome-options"><label><input type="checkbox" checked={tourLayout.welcome.showOnce} onChange={(event) => updateLayoutArea('welcome', { showOnce: event.target.checked })} /> Show once per visitor/browser</label><label><input type="checkbox" checked={tourLayout.welcome.showCloseButton} onChange={(event) => updateLayoutArea('welcome', { showCloseButton: event.target.checked })} /> Show close button</label></div>
-              <div className="layout-scene-assignment"><div className="field-label">Show welcome on these scenes</div>{project.scenes.map((scene) => <label key={scene.id}><input type="checkbox" checked={tourLayout.welcome.sceneIds.includes(scene.id)} onChange={(event) => updateLayoutArea('welcome', { sceneIds: event.target.checked ? [...tourLayout.welcome.sceneIds, scene.id] : tourLayout.welcome.sceneIds.filter((id) => id !== scene.id) })} /> {scene.name}</label>)}</div>
+              <div className="layout-scene-assignment">
+                <div className="layout-scene-assignment-head"><div><div className="field-label">Show welcome on these scenes</div><div className="field-help">Select the exact panorama scene(s) where the published welcome screen should appear.</div></div><span className="count-pill">{tourLayout.welcome.sceneIds.filter((id) => project.scenes.some((scene) => scene.id === id)).length} selected</span></div>
+                <div className="layout-scene-assignment-actions"><button type="button" className="mini-button" onClick={() => updateLayoutArea('welcome', { sceneIds: activeSceneId ? [activeSceneId] : [] })} disabled={!activeSceneId}>Only current scene</button><button type="button" className="mini-button" onClick={() => updateLayoutArea('welcome', { sceneIds: project.scenes.map((scene) => scene.id) })}>All scenes</button><button type="button" className="mini-button" onClick={() => updateLayoutArea('welcome', { sceneIds: [] })}>Clear</button></div>
+                <div className="layout-scene-assignment-list">{project.scenes.map((scene, index) => <label key={scene.id} className={scene.id === activeSceneId ? 'current-scene' : ''}><input type="checkbox" checked={tourLayout.welcome.sceneIds.includes(scene.id)} onChange={(event) => updateLayoutArea('welcome', { sceneIds: event.target.checked ? [...new Set([...tourLayout.welcome.sceneIds, scene.id])] : tourLayout.welcome.sceneIds.filter((id) => id !== scene.id) })} /><span><strong>{String(index + 1).padStart(2, '0')} · {scene.name}</strong>{scene.id === activeSceneId && <small>Current editor scene</small>}</span></label>)}</div>
+              </div>
             </>}
             <div className="layout-elements-heading"><strong>{layoutTab === 'toolbar' ? 'Toolbar elements' : 'Welcome screen elements'}</strong><span className="count-pill">{layoutElements.length}</span></div>
             <div className="layout-add-buttons">
@@ -594,9 +708,9 @@ export default function App() {
               <button className="mini-button" type="button" onClick={() => addLayoutElement(layoutTab, 'hotspot')}><Plus size={13} /> Hidden hotspot</button>
             </div>
             <div className="layout-element-list">
-              {layoutElements.map((element) => <button type="button" key={element.id} className={`layout-element-row ${selectedLayoutElement?.id === element.id ? 'selected' : ''}`} onClick={() => setSelectedLayoutElementId(element.id)}>
-                <span className={`layout-element-kind ${element.type}`}>{element.type === 'image' ? <Image size={14} /> : element.type === 'hotspot' ? <Globe2 size={14} /> : <LayoutDashboard size={14} />}</span>
-                <span><strong>{element.label || (element.type === 'hotspot' ? 'Hidden hotspot' : element.type)}</strong><small>{element.action}</small></span>
+              {layoutElements.map((element, index) => <button type="button" draggable key={element.id} className={`layout-element-row ${selectedLayoutElement?.id === element.id ? 'selected' : ''} ${layoutOrderDropTargetId === element.id ? 'drop-target' : ''}`} onClick={() => setSelectedLayoutElementId(element.id)} onDragStart={(event) => beginLayoutOrderDrag(layoutTab, element.id, event)} onDragOver={(event) => markLayoutOrderDropTarget(element.id, event)} onDrop={(event) => dropLayoutElementOn(layoutTab, element.id, event)} onDragEnd={endLayoutOrderDrag} title="Drag to change stacking/order">
+                <span className="layout-element-order">{index + 1}</span><span className={`layout-element-kind ${element.type}`}>{element.type === 'image' ? <Image size={14} /> : element.type === 'hotspot' ? <Globe2 size={14} /> : <LayoutDashboard size={14} />}</span>
+                <span><strong>{element.label || (element.type === 'hotspot' ? 'Hidden hotspot' : element.type)}</strong><small>{element.action}</small></span><span className="layout-drag-handle" aria-hidden="true">⠿</span>
               </button>)}
             </div>
             {selectedLayoutElement && <div className="layout-selected-editor">
@@ -669,7 +783,7 @@ export default function App() {
       </section>
     </div>}
     {showPublish && <div className="modal-backdrop" onClick={() => setShowPublish(false)}><div className="publish-modal" onClick={(e) => e.stopPropagation()}><div className="modal-icon"><Globe2 size={22} /></div><button className="modal-close" onClick={() => setShowPublish(false)} aria-label="Close"><X size={17} /></button><div className="eyebrow">PRODUCTION WORKFLOW</div><h2>Build for the web</h2><p>Build a standalone tour bundle with its own viewer runtime, project configuration, panoramas, hotspots, and included media. Extract the ZIP into an Nginx directory and share that URL; visitors will not see the Studio editor.</p><div className="build-checklist"><span><Check size={15} /> Save / resume draft with local media</span><span><Check size={15} /> Export / import project configuration</span><span><Check size={15} /> Interactive 360° viewer and scene navigation</span><span><Check size={15} /> Multi-resolution tile manifest + viewer support</span><span><Check size={15} /> Standalone player runtime + Nginx deployment ZIP</span></div><button className="button button-primary full-width" onClick={() => void handleBuildProductionTour()} disabled={buildingProduction}>{buildingProduction ? productionStatus : 'Build standalone tour (.zip)'}</button></div></div>}
-    <footer className="bottom-status"><span><span className={`status-dot ${saveState}`} /> Workspace ready</span><span>360 Studio Demo <span className="footer-divider">/</span> v0.13.0</span><span>Project schema v1</span></footer>
+    <footer className="bottom-status"><span><span className={`status-dot ${saveState}`} /> Workspace ready</span><span>360 Studio Demo <span className="footer-divider">/</span> v0.13.1</span><span>Project schema v1</span></footer>
   </div>;
 }
 

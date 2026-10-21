@@ -73,3 +73,12 @@ A build passing automated checks is **not** an automatic production approval. Ma
 - [ ] Panel opacity and backdrop opacity are independently adjustable and the panorama remains visible.
 - [ ] Layout is preserved in project ZIP and standalone production ZIP, including uploaded image assets.
 - [ ] Page/document actions are tested for iframe-compatible and iframe-blocked URLs.
+
+
+## Scene/layout regression checks (v0.13.1)
+
+- Drag scenes to reorder them in both the scene list and the timeline; confirm the active scene and scene IDs remain stable and Previous/Next navigation follows the new order.
+- Reorder toolbar and welcome elements via drag-and-drop; confirm the published player uses the saved element order.
+- Assign the welcome screen to only one scene, then to multiple scenes, then clear the assignment; verify selected scenes show it and unselected scenes do not.
+- Delete a scene with panorama, audio, image/video hotspots, and navigation links. Confirm its scene content is removed, links targeting it are removed/reset, the start scene falls back safely, and media shared by another scene/layout remains.
+- Confirm the last remaining scene cannot be deleted.

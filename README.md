@@ -184,3 +184,14 @@ The build script bundles the player runtime into the static editor output. ZIP64
 - Added standalone tour package inspection (`npm run qa:bundle -- <extracted-dir>`) validating extracted production ZIPs.
 - Added GitHub Actions workflow (`.github/workflows/production-quality.yml`) for automated CI quality checks.
 - Added comprehensive manual regression checklist (`docs/production-qa-checklist.md`) covering editor, hotspots, spatial media, audio, theme, browsers, and Nginx deployment.
+
+
+## Scene ordering, welcome assignment, and safe scene deletion (v0.13.1)
+
+- Drag scene cards in the scene list or scene timeline to reorder the tour. The same stable scene IDs are retained, so navigation target IDs do not break when scenes move.
+- Drag toolbar or welcome-screen rows in the Layout editor to adjust their order/stacking sequence. Their placement coordinates remain independent from list order.
+- Choose the exact panorama scenes where the welcome screen should appear. Quick actions are available for the current scene, all scenes, or no scenes.
+- Delete a scene from the scene list. The last scene cannot be deleted. Deleting a scene removes its panorama, audio, hotspots and scene-specific data; removes navigation hotspots elsewhere that point to it; clears welcome-screen assignments and UI button target actions to the deleted scene; and prunes scene-owned media only when no other scene/layout uses it.
+- Uploaded asset binaries that become orphaned are removed from IndexedDB after the project has been updated. If browser storage cleanup fails, the UI reports that separately rather than restoring references to deleted assets.
+
+Nonfunctional layout actions that are out of scope remain deferred to a later phase; this release focuses on scene assignment, ordering, and safe deletion.

@@ -22,6 +22,25 @@ function openDatabase(): Promise<IDBDatabase> {
   });
 }
 
+/** Remove uploaded binaries that are no longer referenced by the project after deleting a scene. */
+export async function deleteUploadedAssets(ids: string[]): Promise<void> {
+  const uniqueIds = [...new Set(ids.filter(Boolean))];
+  if (!uniqueIds.length) return;
+  const db = await openDatabase();
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(STORE_NAME, 'readwrite');
+      const store = tx.objectStore(STORE_NAME);
+      for (const id of uniqueIds) store.delete(id);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error ?? new Error('Could not remove deleted scene media from browser storage.'));
+      tx.onabort = () => reject(tx.error ?? new Error('Media cleanup was aborted.'));
+    });
+  } finally {
+    db.close();
+  }
+}
+
 export async function persistUploadedAsset(id: string, file: File): Promise<void> {
   const db = await openDatabase();
   try {

@@ -43,3 +43,27 @@ test('standalone player wires layout controls and scene-scoped welcome overlays'
   assert.match(css, /\.tour-layout-toolbar/);
   assert.match(css, /\.tour-welcome-panel/);
 });
+
+
+test('scene cards and timeline support drag-and-drop reordering and scene deletion cleanup', async () => {
+  const app = await read('src/app/App.tsx');
+  const ops = await read('src/lib/sceneEditing.mjs');
+  const store = await read('src/features/assets/assetStorage.ts');
+  assert.match(app, /onDrop=\{\(event\) => dropSceneOn\(scene\.id/);
+  assert.match(app, /draggable=\{project\.scenes\.length > 1\}/);
+  assert.match(app, /Delete scene \$\{scene\.name\}/);
+  assert.match(app, /deleteUploadedAssets\(result\.orphanedUploadedAssetIds\)/);
+  assert.match(ops, /export function reorderById/);
+  assert.match(ops, /export function deleteSceneFromProject/);
+  assert.match(ops, /welcome:\s*\{/);
+  assert.match(store, /export async function deleteUploadedAssets/);
+});
+
+test('welcome-screen assignment has direct per-scene shortcuts and layout elements can be reordered', async () => {
+  const app = await read('src/app/App.tsx');
+  assert.match(app, /Only current scene/);
+  assert.match(app, /All scenes/);
+  assert.match(app, /Clear/);
+  assert.match(app, /onDragStart=\{\(event\) => beginLayoutOrderDrag\(layoutTab, element\.id, event\)\}/);
+  assert.match(app, /dropLayoutElementOn\(layoutTab, element\.id, event\)/);
+});
